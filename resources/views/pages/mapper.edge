@@ -65,14 +65,13 @@
       <div>
         <h2>Layer Source</h2>
         <div class="source-btns">
-          <button id="src-file">📁 File</button>
+          <button id="src-file" title="Media library">📁 File</button>
           <button id="src-camera">📷 Camera</button>
           <button id="src-color">🎨 Color</button>
           <button id="src-material" title="Material library (M)">✨ Material</button>
         </div>
-        <input type="file" id="file-input" accept="video/*,image/*" />
         <div class="info" style="margin-top:4px">
-          Replaces the selected clip, or adds a new clip at the playhead.
+          File and Material open a library. Picking an item replaces the selected clip, or adds a new clip at the playhead.
         </div>
       </div>
 
@@ -113,7 +112,24 @@
       </div>
     </div>
 
-    <aside id="materials-panel" hidden>
+    <aside id="media-panel" class="side-panel" hidden>
+      <div class="mat-panel-head">
+        <h2>Media</h2>
+        <button id="media-close" class="layer-btn" aria-label="Close media">×</button>
+      </div>
+      <button id="media-upload-btn" class="primary">⇪ Upload videos or images</button>
+      <div class="info">
+        Or drop files here. Click an item to put it on the selected clip, or add it at the playhead.
+      </div>
+      <input type="file" id="file-input" accept="video/*,image/*" multiple hidden />
+      <div id="media-uploads"></div>
+      <div id="media-empty" class="media-empty" hidden>
+        Your library is empty. Upload a video or image to get started.
+      </div>
+      <div id="media-grid" class="tile-grid"></div>
+    </aside>
+
+    <aside id="materials-panel" class="side-panel" hidden>
       <div class="mat-panel-head">
         <h2>Materials</h2>
         <button id="materials-close" class="layer-btn" aria-label="Close materials">×</button>
@@ -121,7 +137,7 @@
       <div class="info">
         Click a material to put it on the selected clip, or add it at the playhead. Hover to preview.
       </div>
-      <div id="materials-grid"></div>
+      <div id="materials-grid" class="tile-grid"></div>
       <input type="file" id="material-file" accept=".fs,.frag,.glsl,.txt" hidden />
     </aside>
 

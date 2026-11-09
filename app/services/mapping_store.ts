@@ -319,7 +319,8 @@ export class MappingStore {
     }
   }
 
-  async list(): Promise<MappingSummary[]> {
+  /** Every saved mapping, newest first */
+  async all(): Promise<Mapping[]> {
     let files: string[] = []
     try {
       files = await readdir(this.mappingsDir)
@@ -334,7 +335,11 @@ export class MappingStore {
     return mappings
       .filter((m): m is Mapping => m !== null)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .map((m) => this.summarize(m))
+  }
+
+  async list(): Promise<MappingSummary[]> {
+    const mappings = await this.all()
+    return mappings.map((m) => this.summarize(m))
   }
 
   async find(id: string): Promise<Mapping | null> {

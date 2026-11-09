@@ -539,7 +539,8 @@ canvas {
   border-color: #0f9;
   color: #0f9;
 }
-#materials-panel {
+
+.side-panel {
   position: absolute;
   top: 0;
   right: 0;
@@ -556,7 +557,7 @@ canvas {
   overflow-y: auto;
   transition: bottom 0.25s ease;
 }
-#materials-panel[hidden] {
+.side-panel[hidden] {
   display: none;
 }
 .mat-panel-head {
@@ -569,7 +570,7 @@ canvas {
   font-size: 13px;
   color: #ccd;
 }
-#materials-grid {
+.tile-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
@@ -869,4 +870,108 @@ button:disabled {
 #layer-desc:focus {
   outline: none;
   border-color: #0f9;
+}
+
+/* ---------- Media library ---------- */
+#src-file.on {
+  border-color: #0f9;
+  color: #0f9;
+}
+.side-panel.dropping {
+  outline: 2px dashed #0f9;
+  outline-offset: -6px;
+}
+.media-thumb {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.media-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.media-icon {
+  font-size: 22px;
+}
+.media-kind {
+  position: absolute;
+  left: 4px;
+  bottom: 3px;
+  font-size: 9px;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+.media-meta {
+  padding: 0 6px 4px;
+  font-size: 10px;
+  color: #8a90a0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mat-tile .mat-name + .media-meta {
+  margin-top: -3px;
+}
+.mat-tile.new {
+  border-color: #0f9;
+  box-shadow: 0 0 0 1px #0f9;
+}
+.media-empty {
+  padding: 24px 8px;
+  text-align: center;
+  color: #8a90a0;
+  font-size: 12px;
+  border: 1px dashed #334;
+  border-radius: 6px;
+}
+.media-empty[hidden] {
+  display: none;
+}
+#media-uploads {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.media-upload {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  font-size: 11px;
+  padding: 6px 8px;
+  border: 1px solid #334;
+  border-radius: 5px;
+  background: #1a1a2e;
+}
+.media-upload .mu-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.media-upload .mu-state {
+  color: #8ab;
+}
+.media-upload.error .mu-state {
+  color: #f66;
+  grid-column: 1 / -1;
+}
+.mu-bar {
+  grid-column: 1 / -1;
+  height: 3px;
+  background: #223;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.mu-bar > div {
+  width: 0;
+  height: 100%;
+  background: #0f9;
+  transition: width 0.15s;
 }

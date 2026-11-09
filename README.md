@@ -10,7 +10,7 @@ A powerful, browser-based projection mapping tool built with WebGL. Create stunn
 
 - **Multi-Layer Support** - Work with multiple layers simultaneously for complex compositions
 - **Multiple Input Sources**
-  - 📁 File upload (video/image)
+  - 📁 Media library (videos and images you upload, kept on the server)
   - 📷 Live camera feed
   - 🎨 Solid colors
   - ✨ Materials: generative shaders (patterns, noise, light effects, 3D scenes) from a built-in library, plus your own
@@ -46,6 +46,17 @@ The Timeline panel runs along the bottom of the screen:
 - **Tracks** - One row per layer; click a track header to select that layer
 - **Clips** - Each source you load becomes a clip. Drag a clip to move it (it snaps to the playhead and other clip edges), drag it onto another track to change its layer, and drag its edges to trim it
 - Source buttons replace the **selected clip**. If no clip is selected, they add a new clip at the playhead (click an empty spot on a track to deselect)
+
+## Media Library
+
+**📁 File** opens the media library sidebar: every video and image you've uploaded, with thumbnails, length and size.
+
+- **Upload** - Click **Upload videos or images** (you can pick several) or drop files onto the sidebar. Each file shows upload progress and is added to the library
+- **Use** - Click an item to put it on the selected clip, or add it at the playhead
+- **Remove** - Hover an item and click 🗑. The file is deleted from the server only if no saved mapping uses it; otherwise it just leaves the list and those mappings keep working
+- Media that arrived through a saved or imported mapping shows up in the library too, named after its clip
+
+Files are stored once (by checksum) in `storage/media/`, so using the same video in several mappings doesn't take extra space. Library details and thumbnails live in `storage/library/`.
 
 ## Materials
 
@@ -127,7 +138,7 @@ storage/media/<sha256>.<ext>   video and image files, stored once and shared bet
 - Frontend assets bundled by Vite through `@adonisjs/vite`
 - Rendering is still vanilla JavaScript and WebGL, using a perspective-correction shader for accurate mapping
 - Supports real-time video playback with hardware-accelerated rendering
-- Media you load stays in the browser until you save; saving uploads it to the server running the app
+- Videos and images are uploaded to the server running the app when you add them to the media library
 
 ## Development
 

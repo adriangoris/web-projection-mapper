@@ -205,7 +205,10 @@ function selectedClip() {
 function toggleMaterialsPanel(open = matPanel.hidden) {
   matPanel.hidden = !open
   document.getElementById('src-material').classList.toggle('on', open)
-  if (open) renderMaterialsGrid()
+  if (open) {
+    toggleMediaPanel(false)
+    renderMaterialsGrid()
+  }
 }
 
 let hoverAnim = null
@@ -1629,52 +1632,269 @@ document.addEventListener('click', (e) => {
   if (b) b.blur()
 })
 
-// Source buttons
-let fileTarget = null
-document.getElementById('src-file').addEventListener('click', () => {
-  fileTarget = sourceTarget()
-  document.getElementById('file-input').click()
-})
+// ================= Media library (File source) =================
+// The File button opens a sidebar of videos and images stored on the
+// server. Uploading adds files to the library; clicking one puts it on the
+// selected clip (or adds a clip at the playhead), like materials.
+const mediaPanel = document.getElementById('media-panel')
+const mediaGrid = document.getElementById('media-grid')
+const mediaInput = document.getElementById('file-input')
+const mediaUploads = document.getElementById('media-uploads')
+const mediaEmpty = document.getElementById('media-empty')
+const mediaLib = { items: [], loaded: false }
 
-document.getElementById('file-input').addEventListener('change', (e) => {
-  const target = fileTarget
-  const file = e.target.files[0]
-  e.target.value = ''
-  if (!target || !file) return
+const fmtSize = (b) =>
+  b >= 1e9
+    ? (b / 1e9).toFixed(1) + ' GB'
+    : b >= 1e6
+      ? (b / 1e6).toFixed(1) + ' MB'
+      : Math.max(1, Math.round(b / 1e3)) + ' KB'
+const fmtDur = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`
 
-  const url = URL.createObjectURL(file)
-  const name = file.name
+function toggleMediaPanel(open = mediaPanel.hidden) {
+  mediaPanel.hidden = !open
+  document.getElementById('src-file').classList.toggle('on', open)
+  if (open) {
+    toggleMaterialsPanel(false)
+    loadMediaLibrary()
+  }
+}
 
-  if (file.type.startsWith('video')) {
-    const video = document.createElement('video')
-    video.src = url
-    video.muted = true
-    video.playsInline = true
-    video.preload = 'auto'
-    video.onloadeddata = () => {
-      video.onloadeddata = null
-      setClipSource(target, {
-        kind: 'video',
-        media: video,
-        name,
-        url,
-        stream: null,
-        srcDur: video.duration,
+async function loadMediaLibrary() {
+  try {
+    const res = await fetch('/api/library', { headers: { Accept: 'application/json' } })
+    if (!res.ok) throw new Error()
+    mediaLib.items = (await res.json()).items
+    mediaLib.loaded = true
+  } catch {
+    setStatus("Couldn't load the media library", { error: true })
+  }
+  renderMediaGrid()
+}
+
+function renderMediaGrid(highlight = []) {
+  const sel = selectedClip()
+  mediaEmpty.hidden = !mediaLib.loaded || mediaLib.items.length > 0
+  mediaGrid.innerHTML = mediaLib.items
+    .map((m) => {
+      const meta = [m.kind === 'video' && m.duration ? fmtDur(m.duration) : null, fmtSize(m.size)]
+        .filter(Boolean)
+        .join(' · ')
+      const thumb = m.thumbnail
+        ? `<img src="${esc(m.thumbnail)}" alt="" loading="lazy">`
+        : `<span class="media-icon">${m.kind === 'video' ? '🎬' : '🖼'}</span>`
+      const cls = [
+        'mat-tile',
+        sel?.ref === m.media ? 'sel' : '',
+        highlight.includes(m.media) ? 'new' : '',
+      ].join(' ')
+      return `
+      <div class="${cls}" data-media="${esc(m.media)}" title="${esc(m.name)} (${meta})">
+        <div class="media-thumb">${thumb}<span class="media-kind">${m.kind === 'video' ? '▶' : '▣'}</span></div>
+        <span class="mat-name">${esc(m.name)}</span>
+        <span class="media-meta">${meta}</span>
+        <button class="mat-edit" data-remove title="Remove from library">🗑</button>
+      </div>`
+    })
+    .join('')
+}
+
+// A small JPEG of the first frame worth showing
+async function mediaThumbnail(el) {
+  const w = 192,
+    h = 120
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = '#000'
+  ctx.fillRect(0, 0, w, h)
+  if (el.tagName === 'VIDEO') {
+    const at = Math.min(1, (el.duration || 0) / 3)
+    if (at > 0 && Math.abs(el.currentTime - at) > 0.01) {
+      await new Promise((resolve) => {
+        el.addEventListener('seeked', resolve, { once: true })
+        el.currentTime = at
+        setTimeout(resolve, 2000)
       })
     }
-  } else {
-    const img = new Image()
-    img.onload = () =>
-      setClipSource(target, {
-        kind: 'image',
-        media: img,
-        name,
-        url,
-        stream: null,
-        srcDur: Infinity,
-      })
-    img.src = url
   }
+  const sw = el.videoWidth || el.naturalWidth || w
+  const sh = el.videoHeight || el.naturalHeight || h
+  const scale = Math.max(w / sw, h / sh)
+  ctx.drawImage(el, (w - sw * scale) / 2, (h - sh * scale) / 2, sw * scale, sh * scale)
+  return c.toDataURL('image/jpeg', 0.75)
+}
+
+// Load a local file just enough to check it plays and read its details
+function probeFile(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const done = (value, err) => {
+      URL.revokeObjectURL(url)
+      err ? reject(err) : resolve(value)
+    }
+    if (file.type.startsWith('video')) {
+      const v = document.createElement('video')
+      v.muted = true
+      v.preload = 'auto'
+      v.onloadeddata = async () => {
+        try {
+          done({ kind: 'video', duration: v.duration, thumbnail: await mediaThumbnail(v) })
+        } catch (e) {
+          done(null, e)
+        }
+      }
+      v.onerror = () => done(null, new Error("This browser can't play that video"))
+      v.src = url
+    } else {
+      const img = new Image()
+      img.onload = async () =>
+        done({ kind: 'image', duration: null, thumbnail: await mediaThumbnail(img) })
+      img.onerror = () => done(null, new Error("That image couldn't be opened"))
+      img.src = url
+    }
+  })
+}
+
+// POST with upload progress (fetch can't report it)
+function uploadWithProgress(url, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open('POST', url)
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream')
+    xhr.setRequestHeader('Accept', 'application/json')
+    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded / e.total)
+    xhr.onload = () => {
+      let body = {}
+      try {
+        body = JSON.parse(xhr.responseText)
+      } catch {}
+      xhr.status < 300
+        ? resolve(body)
+        : reject(new Error(body.error || `Upload failed (${xhr.status})`))
+    }
+    xhr.onerror = () => reject(new Error('Upload failed. Check your connection.'))
+    xhr.send(file)
+  })
+}
+
+async function uploadToLibrary(files) {
+  const added = []
+  for (const file of files) {
+    const row = document.createElement('div')
+    row.className = 'media-upload'
+    row.innerHTML = `<span class="mu-name">${esc(file.name)}</span><span class="mu-state">Checking…</span><div class="mu-bar"><div></div></div>`
+    mediaUploads.appendChild(row)
+    const state = row.querySelector('.mu-state')
+    const bar = row.querySelector('.mu-bar > div')
+    try {
+      if (!/^(video|image)\//.test(file.type)) throw new Error('Not a video or image')
+      const info = await probeFile(file)
+      const { media } = await uploadWithProgress(
+        `/api/media?ext=${encodeURIComponent(fileExt(file.name, file.type))}`,
+        file,
+        (p) => {
+          bar.style.width = `${Math.round(p * 100)}%`
+          state.textContent = `${Math.round(p * 100)}%`
+        }
+      )
+      const res = await fetch('/api/library', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ media, name: file.name, ...info }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || 'Couldn’t add it to the library')
+      added.push(media)
+      row.remove()
+    } catch (err) {
+      row.classList.add('error')
+      state.textContent = err.message
+      setTimeout(() => row.remove(), 6000)
+    }
+  }
+  if (added.length) {
+    await loadMediaLibrary()
+    renderMediaGrid(added)
+    setStatus(`Added ${added.length} file${added.length > 1 ? 's' : ''} to the library`)
+  }
+}
+
+async function useLibraryItem(item) {
+  const target = sourceTarget()
+  if (!target) return setStatus('Add a layer first')
+  setStatus(`Loading ${item.name}…`, { sticky: true })
+  const src = await loadClipSource({ kind: item.kind, media: item.media, name: item.name })
+  if (src.missing) return setStatus(`${item.name} couldn't be loaded`, { error: true })
+  setClipSource(target, { ...src, ref: item.media })
+  setStatus('')
+  renderMediaGrid()
+  // Older entries have no thumbnail or duration yet; fill them in now
+  if (!item.thumbnail || (item.kind === 'video' && !item.duration)) {
+    const body = { duration: item.kind === 'video' ? src.media.duration : undefined }
+    if (!item.thumbnail) {
+      const probe = item.kind === 'video' ? src.media.cloneNode() : src.media
+      if (probe.tagName === 'VIDEO') {
+        probe.muted = true
+        await new Promise((r) => {
+          probe.addEventListener('loadeddata', r, { once: true })
+          setTimeout(r, 3000)
+        })
+      }
+      body.thumbnail = await mediaThumbnail(probe).catch(() => undefined)
+    }
+    fetch(`/api/library/${item.media}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then(() => loadMediaLibrary())
+  }
+}
+
+mediaGrid.addEventListener('click', async (e) => {
+  const tile = e.target.closest('[data-media]')
+  if (!tile) return
+  const item = mediaLib.items.find((m) => m.media === tile.dataset.media)
+  if (!item) return
+  if (e.target.closest('[data-remove]')) {
+    const inUse = layers.some((l) => l.clips.some((c) => c.ref === item.media))
+    const note = inUse ? '\n\nThis mapping uses it, so its clips will keep working.' : ''
+    if (!confirm(`Remove "${item.name}" from the library?${note}`)) return
+    const res = await fetch(`/api/library/${item.media}${inUse ? '?keepFile=1' : ''}`, {
+      method: 'DELETE',
+    })
+    if (!res.ok) return setStatus("Couldn't remove that file", { error: true })
+    await loadMediaLibrary()
+    setStatus(`Removed "${item.name}" from the library`)
+    return
+  }
+  useLibraryItem(item)
+})
+
+document.getElementById('src-file').addEventListener('click', () => toggleMediaPanel())
+document.getElementById('media-close').addEventListener('click', () => toggleMediaPanel(false))
+document.getElementById('media-upload-btn').addEventListener('click', () => mediaInput.click())
+mediaInput.addEventListener('change', () => {
+  const files = [...mediaInput.files]
+  mediaInput.value = ''
+  if (files.length) uploadToLibrary(files)
+})
+
+// Drop files anywhere on the sidebar to upload them
+mediaPanel.addEventListener('dragover', (e) => {
+  if (![...e.dataTransfer.types].includes('Files')) return
+  e.preventDefault()
+  mediaPanel.classList.add('dropping')
+})
+mediaPanel.addEventListener('dragleave', (e) => {
+  if (!mediaPanel.contains(e.relatedTarget)) mediaPanel.classList.remove('dropping')
+})
+mediaPanel.addEventListener('drop', (e) => {
+  e.preventDefault()
+  mediaPanel.classList.remove('dropping')
+  const files = [...e.dataTransfer.files]
+  if (files.length) uploadToLibrary(files)
 })
 
 // Camera
@@ -2165,7 +2385,10 @@ document.addEventListener('keydown', (e) => {
   if (key === 'p') toggleCorners()
   if (key === 't') toggleTimeline()
   if (key === 'm') toggleMaterialsPanel()
-  if (key === 'escape' && !matPanel.hidden) toggleMaterialsPanel(false)
+  if (key === 'escape') {
+    toggleMaterialsPanel(false)
+    toggleMediaPanel(false)
+  }
   if (key === 'r') e.shiftKey ? resetActiveShape() : resetActiveCorners()
   if (key === ' ') {
     e.preventDefault()
