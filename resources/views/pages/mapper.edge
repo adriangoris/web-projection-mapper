@@ -49,11 +49,17 @@
           <button id="src-file">📁 File</button>
           <button id="src-camera">📷 Camera</button>
           <button id="src-color">🎨 Color</button>
+          <button id="src-material" title="Material library (M)">✨ Material</button>
         </div>
         <input type="file" id="file-input" accept="video/*,image/*" />
         <div class="info" style="margin-top:4px">
           Replaces the selected clip, or adds a new clip at the playhead.
         </div>
+      </div>
+
+      <div id="material-settings" hidden>
+        <h2>Material settings</h2>
+        <div id="material-params"></div>
       </div>
 
       <div>
@@ -81,9 +87,49 @@
         <strong>Hotkeys:</strong>
         <div>H — panel | F — fullscreen | R — reset (Shift: shape)</div>
         <div>P — points | 1-9 — layer | Del — delete</div>
-        <div>T — timeline | Space — play/pause</div>
+        <div>T — timeline | M — materials</div>
+        <div>Space — play/pause</div>
         <div>Ctrl/⌘+S — save (Shift: save as)</div>
         <div>←/→ — step (Shift: 1s) | Home/End</div>
+      </div>
+    </div>
+
+    <aside id="materials-panel" hidden>
+      <div class="mat-panel-head">
+        <h2>Materials</h2>
+        <button id="materials-close" class="layer-btn" aria-label="Close materials">×</button>
+      </div>
+      <div class="info">
+        Click a material to put it on the selected clip, or add it at the playhead. Hover to preview.
+      </div>
+      <div id="materials-grid"></div>
+      <input type="file" id="material-file" accept=".fs,.frag,.glsl,.txt" hidden />
+    </aside>
+
+    <div id="mat-editor" hidden>
+      <div class="mat-editor-box" role="dialog" aria-labelledby="mat-editor-title">
+        <div class="mat-editor-head">
+          <h2 id="mat-editor-title">New material</h2>
+          <input id="mat-name" type="text" maxlength="120" aria-label="Material name" />
+          <button id="mat-close" class="layer-btn" aria-label="Close editor">×</button>
+        </div>
+        <div class="mat-editor-body">
+          <textarea id="mat-source" spellcheck="false" aria-label="Shader code"></textarea>
+          <div class="mat-editor-side">
+            <canvas id="mat-preview" width="320" height="200"></canvas>
+            <pre id="mat-errors" hidden></pre>
+            <div class="info">
+              Materials use the ISF shader format (isf.video). Settings go in the JSON header's INPUTS (float, long, bool, color, point2D) and show up as controls. Use isf_FragNormCoord (0–1), RENDERSIZE and TIME. Ctrl/⌘+S saves.
+            </div>
+          </div>
+        </div>
+        <div class="mat-editor-foot">
+          <button id="mat-delete" class="danger" hidden>Delete</button>
+          <button id="mat-download">Download .fs</button>
+          <span class="tl-spacer"></span>
+          <button id="mat-cancel">Cancel</button>
+          <button id="mat-save" class="primary">Save to library</button>
+        </div>
       </div>
     </div>
 

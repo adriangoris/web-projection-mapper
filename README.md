@@ -13,6 +13,7 @@ A powerful, browser-based projection mapping tool built with WebGL. Create stunn
   - 📁 File upload (video/image)
   - 📷 Live camera feed
   - 🎨 Solid colors
+  - ✨ Materials: generative shaders (patterns, noise, light effects, 3D scenes) from a built-in library, plus your own
 - **Real-Time Warping** - Drag corner points to map your content onto any surface
 - **Move Layers** - Grab a layer anywhere inside its shape and drag it
 - **Custom Shapes** - Add points to a layer's outline to cut it into any polygon (arches, windows, triangles)
@@ -46,6 +47,19 @@ The Timeline panel runs along the bottom of the screen:
 - **Clips** - Each source you load becomes a clip. Drag a clip to move it (it snaps to the playhead and other clip edges), drag it onto another track to change its layer, and drag its edges to trim it
 - Source buttons replace the **selected clip**. If no clip is selected, they add a new clip at the playhead (click an empty spot on a track to deselect)
 
+## Materials
+
+Materials are animated, generated sources: patterns, noise, light effects and 3D scenes drawn by GLSL shaders, so they stay sharp at any size.
+
+- **Library** - Click **✨ Material** (or press `M`) to open the library. Hover a tile to preview it, click to put it on the selected clip (or add it at the playhead)
+- **Settings** - Selecting a material clip shows its settings (colors, speed, scale…) in the panel. Settings belong to the clip, so the same material can look different on each layer
+- **Your own materials** - **New material** opens a shader editor with a live preview and error messages. **Import ISF** loads a `.fs` file. On a built-in material, hover and click ⧉ (or **Duplicate** in its settings) to start from a copy
+- Built-in materials are read-only; materials you add are marked with a green dot and can be edited or deleted
+
+Materials use the [ISF](https://isf.video) shader format, so many shaders from the ISF library, VDMX or MadMapper can be imported. A JSON header lists the settings (`float`, `long`, `bool`, `color`, `point2D`), and the shader gets `isf_FragNormCoord`, `RENDERSIZE`, `TIME` (seconds into the clip) and `DATE`. Image and audio inputs and multi-pass shaders aren't supported yet.
+
+Built-in materials live in `resources/materials/*.fs`; materials you add are saved in `storage/materials/` and are included in `.pmap` exports when a mapping uses them.
+
 ## Layer Shapes
 
 - **Move a layer** - Drag anywhere inside it. Clicking a layer on the canvas also selects it
@@ -71,6 +85,7 @@ Saved mappings live on the server in `storage/` (set `STORAGE_PATH` to move it):
 ```
 storage/mappings/<id>.json     mapping document
 storage/mappings/<id>.jpg      preview thumbnail
+storage/materials/<id>.json    materials you added to the library
 storage/media/<sha256>.<ext>   video and image files, stored once and shared between mappings
 ```
 
@@ -88,6 +103,7 @@ storage/media/<sha256>.<ext>   video and image files, stored once and shared bet
 | `R`            | Reset active layer corners (`Shift`+`R`: reset its shape)  |
 | `1-9`          | Switch between layers                                      |
 | `T`            | Toggle timeline                                            |
+| `M`            | Toggle material library                                    |
 | `Space`        | Play / pause                                               |
 | `←` / `→`      | Step one frame (hold `Shift` for 1s)                       |
 | `Home` / `End` | Jump to start / end                                        |
@@ -150,6 +166,10 @@ app/controllers/mappings_controller.ts  Library page, editor page, mappings API
 app/services/mapping_store.ts       Saves mappings and media under storage/
 app/services/projection_file.ts     .pmap export / import
 app/services/zip.ts                 Minimal zip reader / writer
+app/services/material_library.ts    Built-in and saved materials (ISF shaders)
+app/controllers/materials_controller.ts  Materials API
+resources/materials/                Built-in material shaders (.fs)
+resources/js/materials.js           ISF parser and WebGL material renderer
 resources/views/pages/home.edge     Landing page (/about)
 resources/views/pages/mapper.edge   Projection mapping app markup
 resources/views/pages/mappings.edge Mappings library

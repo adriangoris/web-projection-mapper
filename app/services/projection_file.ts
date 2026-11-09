@@ -1,12 +1,15 @@
 import { readFile } from 'node:fs/promises'
 import {
   type Mapping,
+  type MappingData,
   type MappingStore,
   ValidationError,
   cleanMappingData,
   cleanName,
+  materialRefs,
   mediaRefs,
 } from '#services/mapping_store'
+import materialLibrary from '#services/material_library'
 import { ZipError, createZip, readZip } from '#services/zip'
 
 /*
@@ -20,6 +23,7 @@ import { ZipError, createZip, readZip } from '#services/zip'
 |   mapping.json      { format, version, name, data }
 |   thumbnail.jpg     optional preview
 |   media/<ref>       every video / image the clips use
+|   materials/<id>.json  materials the clips use that aren't built in
 |
 */
 
@@ -65,7 +69,48 @@ export async function exportProjection(store: MappingStore, mapping: Mapping) {
       compress: false,
     })
   }
+  for (const id of materialRefs(mapping.data)) {
+    const material = materialLibrary.isBuiltin(id) ? null : await materialLibrary.find(id)
+    if (!material) continue
+    const { name, source } = material
+    entries.push({
+      name: `materials/${id}.json`,
+      data: Buffer.from(JSON.stringify({ id, name, source }, null, 2)),
+      compress: true,
+    })
+  }
   return createZip(entries)
+}
+
+/**
+ * Adds the archive's materials to the library. A material that already
+ * exists with different code is added as a copy and the clips are pointed
+ * at the copy, so importing never changes someone's existing material.
+ */
+async function importMaterials(data: MappingData, files: Map<string, Buffer>) {
+  const remap = new Map<string, string>()
+  for (const id of materialRefs(data)) {
+    const entry = files.get(`materials/${id}.json`)
+    if (!entry || materialLibrary.isBuiltin(id)) continue
+    let incoming: any
+    try {
+      incoming = JSON.parse(entry.toString('utf8'))
+    } catch {
+      throw new ValidationError(`Material ${id} in the projection file is corrupt`)
+    }
+    const existing = await materialLibrary.find(id)
+    if (existing?.source === incoming.source) continue
+    const created = await materialLibrary.create(
+      { name: incoming.name, source: incoming.source },
+      existing ? undefined : id
+    )
+    if (created.id !== id) remap.set(id, created.id)
+  }
+  data.layers.forEach((l) =>
+    l.clips.forEach((c) => {
+      if (c.material && remap.has(c.material)) c.material = remap.get(c.material)
+    })
+  )
 }
 
 export async function importProjection(store: MappingStore, file: Buffer, name?: string) {
@@ -100,6 +145,7 @@ export async function importProjection(store: MappingStore, file: Buffer, name?:
       throw new ValidationError(`Projection file is missing media ${ref}`)
     }
   }
+  await importMaterials(data, files)
   const thumb = files.get('thumbnail.jpg') ?? null
   return store.create(cleanName(name || manifest.name), data, thumb)
 }

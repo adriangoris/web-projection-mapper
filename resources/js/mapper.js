@@ -1,3 +1,11 @@
+import {
+  MaterialRenderer,
+  MaterialTarget,
+  defaultParams,
+  drawThumbnail,
+  parseISF,
+} from './materials.js'
+
 const canvas = document.getElementById('gl')
 const wrap = document.getElementById('canvas-wrap')
 const gl = canvas.getContext('webgl', { antialias: true, preserveDrawingBuffer: true })
@@ -20,6 +28,7 @@ uniform vec2 u_corners[4];
 uniform float u_alpha;
 uniform vec2 u_mask[32]; // optional cut-out polygon, in the layer's uv space
 uniform int u_maskN;
+uniform float u_flipY; // 1 for textures rendered by WebGL (materials), which are upside down
 
 vec2 getUV(vec2 p, vec2 c0, vec2 c1, vec2 c2, vec2 c3) {
   vec2 e = c1 - c0, f = c3 - c0, g = c0 - c1 + c2 - c3, h = p - c0;
@@ -63,7 +72,7 @@ void main() {
   vec2 uv = getUV(v_pos, u_corners[0], u_corners[1], u_corners[2], u_corners[3]);
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
   if (!inMask(uv)) discard;
-  vec4 c = texture2D(u_tex, uv);
+  vec4 c = texture2D(u_tex, vec2(uv.x, mix(uv.y, 1.0 - uv.y, u_flipY)));
   gl_FragColor = vec4(c.rgb, c.a * u_alpha);
 }`
 
@@ -77,10 +86,12 @@ function createShader(type, src) {
 const prog = gl.createProgram()
 gl.attachShader(prog, createShader(gl.VERTEX_SHADER, vsSource))
 gl.attachShader(prog, createShader(gl.FRAGMENT_SHADER, fsSource))
+gl.bindAttribLocation(prog, 0, 'a_pos')
 gl.linkProgram(prog)
 gl.useProgram(prog)
 
-const aPos = gl.getAttribLocation(prog, 'a_pos')
+const aPos = 0
+const uFlipY = gl.getUniformLocation(prog, 'u_flipY')
 const uCorners = gl.getUniformLocation(prog, 'u_corners')
 const uAlpha = gl.getUniformLocation(prog, 'u_alpha')
 const uMask = gl.getUniformLocation(prog, 'u_mask')
@@ -93,6 +104,440 @@ gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf)
 gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, 1, 1, -1, 1]), gl.STATIC_DRAW)
 gl.enableVertexAttribArray(aPos)
 gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0)
+
+// ================= Material library =================
+// Materials are generative shaders (see materials.js). The library holds the
+// built-in ones plus any you add; a material clip stores the material's id
+// and its own settings, so one material can be used with different looks.
+const materialLib = { list: [], byId: new Map() }
+const matRenderer = new MaterialRenderer(gl)
+const matPanel = document.getElementById('materials-panel')
+const matGrid = document.getElementById('materials-grid')
+const matFile = document.getElementById('material-file')
+const matSettings = document.getElementById('material-settings')
+const matParamsEl = document.getElementById('material-params')
+const matEditor = document.getElementById('mat-editor')
+const matEd = {
+  name: document.getElementById('mat-name'),
+  source: document.getElementById('mat-source'),
+  preview: document.getElementById('mat-preview'),
+  errors: document.getElementById('mat-errors'),
+  save: document.getElementById('mat-save'),
+  del: document.getElementById('mat-delete'),
+  title: document.getElementById('mat-editor-title'),
+}
+let matSettingsKey = null
+
+const NEW_MATERIAL = `/*{
+  "DESCRIPTION": "My material",
+  "INPUTS": [
+    { "NAME": "color1", "LABEL": "Color", "TYPE": "color", "DEFAULT": [1, 1, 1, 1] },
+    { "NAME": "speed", "LABEL": "Speed", "TYPE": "float", "DEFAULT": 1, "MIN": 0, "MAX": 5 },
+    { "NAME": "scale", "LABEL": "Scale", "TYPE": "float", "DEFAULT": 8, "MIN": 1, "MAX": 40 }
+  ]
+}*/
+
+// isf_FragNormCoord: 0..1 across the layer · TIME: seconds into the clip
+// RENDERSIZE: size in pixels · settings above become uniforms
+void main() {
+  vec2 uv = isf_FragNormCoord;
+  float v = 0.5 + 0.5 * sin(uv.x * scale + TIME * speed) * cos(uv.y * scale - TIME * speed);
+  gl_FragColor = vec4(color1.rgb * v, 1.0);
+}
+`
+
+function materialInputs(material) {
+  try {
+    return parseISF(material.source || '').inputs
+  } catch {
+    return []
+  }
+}
+
+function placeholderCanvas(label) {
+  const c = document.createElement('canvas')
+  c.width = 256
+  c.height = 144
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = '#222'
+  ctx.fillRect(0, 0, 256, 144)
+  ctx.fillStyle = '#f66'
+  ctx.font = '16px system-ui, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.fillText(label, 128, 78)
+  return c
+}
+
+// A clip source for a material. `media` is only shown if the shader can't run.
+function materialSource(material, params) {
+  return {
+    kind: 'material',
+    media: placeholderCanvas('Material unavailable'),
+    name: material.name,
+    url: null,
+    stream: null,
+    srcDur: Infinity,
+    material: material.id,
+    params: { ...defaultParams(materialInputs(material)), ...params },
+  }
+}
+
+async function loadMaterials() {
+  try {
+    const res = await fetch('/api/materials', { headers: { Accept: 'application/json' } })
+    if (!res.ok) throw new Error()
+    const { materials } = await res.json()
+    materialLib.list = materials
+    materialLib.byId = new Map(materials.map((m) => [m.id, m]))
+  } catch {
+    setStatus("Couldn't load the material library", { error: true })
+  }
+  matSettingsKey = null
+  if (!matPanel.hidden) renderMaterialsGrid()
+  renderMaterialSettings()
+}
+
+function selectedClip() {
+  return tl.sel != null ? findClip(tl.sel)?.clip : null
+}
+
+// ---- Library panel ----
+function toggleMaterialsPanel(open = matPanel.hidden) {
+  matPanel.hidden = !open
+  document.getElementById('src-material').classList.toggle('on', open)
+  if (open) renderMaterialsGrid()
+}
+
+let hoverAnim = null
+function animateTile(canvasEl, material) {
+  cancelAnimationFrame(hoverAnim)
+  const start = performance.now()
+  const loop = (now) => {
+    drawThumbnail(material, canvasEl, 1.5 + (now - start) / 1000)
+    hoverAnim = requestAnimationFrame(loop)
+  }
+  hoverAnim = requestAnimationFrame(loop)
+}
+
+function renderMaterialsGrid() {
+  const sel = selectedClip()
+  const selId = sel?.kind === 'material' ? sel.material : null
+  matGrid.innerHTML =
+    materialLib.list
+      .map(
+        (m) => `
+      <div class="mat-tile${m.id === selId ? ' sel' : ''}" data-id="${esc(m.id)}" title="${esc(m.name)}">
+        <canvas></canvas>
+        <span class="mat-name">${esc(m.name)}</span>
+        ${
+          m.builtin
+            ? `<button class="mat-edit" data-dup title="Duplicate and edit">⧉</button>`
+            : `<button class="mat-edit" title="Edit">✎</button><span class="mat-mine" title="Added by you">●</span>`
+        }
+      </div>`
+      )
+      .join('') +
+    `<button class="mat-tile mat-add" id="mat-new"><span>+</span>New material</button>
+     <button class="mat-tile mat-add" id="mat-import"><span>⇪</span>Import ISF</button>`
+
+  // Draw thumbnails a few at a time so the panel opens instantly
+  const tiles = [...matGrid.querySelectorAll('.mat-tile[data-id]')]
+  let i = 0
+  const step = () => {
+    const end = Math.min(tiles.length, i + 4)
+    for (; i < end; i++) {
+      const m = materialLib.byId.get(tiles[i].dataset.id)
+      if (m) drawThumbnail(m, tiles[i].querySelector('canvas'))
+    }
+    if (i < tiles.length) setTimeout(step, 0)
+  }
+  step()
+}
+
+matGrid.addEventListener('click', (e) => {
+  if (e.target.closest('#mat-new')) return openMaterialEditor(null)
+  if (e.target.closest('#mat-import')) return matFile.click()
+  const tile = e.target.closest('.mat-tile[data-id]')
+  if (!tile) return
+  const material = materialLib.byId.get(tile.dataset.id)
+  if (!material) return
+  const edit = e.target.closest('.mat-edit')
+  if (edit) {
+    if (edit.hasAttribute('data-dup')) {
+      openMaterialEditor({ name: `${material.name} copy`, source: material.source })
+    } else openMaterialEditor(material)
+    return
+  }
+  const target = sourceTarget()
+  if (!target) return setStatus('Add a layer first')
+  setClipSource(target, materialSource(material, {}))
+  renderMaterialsGrid()
+})
+
+matGrid.addEventListener('mouseover', (e) => {
+  const tile = e.target.closest('.mat-tile[data-id]')
+  if (!tile || tile.contains(e.relatedTarget)) return
+  const m = materialLib.byId.get(tile.dataset.id)
+  if (m) animateTile(tile.querySelector('canvas'), m)
+})
+matGrid.addEventListener('mouseout', (e) => {
+  const tile = e.target.closest('.mat-tile[data-id]')
+  if (!tile || tile.contains(e.relatedTarget)) return
+  cancelAnimationFrame(hoverAnim)
+  const m = materialLib.byId.get(tile.dataset.id)
+  if (m) drawThumbnail(m, tile.querySelector('canvas'))
+})
+
+document.getElementById('src-material').addEventListener('click', () => toggleMaterialsPanel())
+document
+  .getElementById('materials-close')
+  .addEventListener('click', () => toggleMaterialsPanel(false))
+
+matFile.addEventListener('change', async () => {
+  const file = matFile.files[0]
+  matFile.value = ''
+  if (!file) return
+  const source = await file.text()
+  openMaterialEditor({ name: file.name.replace(/\.[^.]+$/, ''), source })
+})
+
+// ---- Settings for the selected material clip ----
+const toHex = (c) =>
+  '#' +
+  c
+    .slice(0, 3)
+    .map((v) =>
+      Math.round(clamp(v, 0, 1) * 255)
+        .toString(16)
+        .padStart(2, '0')
+    )
+    .join('')
+const fromHex = (hex, alpha) => [
+  parseInt(hex.slice(1, 3), 16) / 255,
+  parseInt(hex.slice(3, 5), 16) / 255,
+  parseInt(hex.slice(5, 7), 16) / 255,
+  alpha,
+]
+// Slider step of about 1/100th of the range, rounded to 1, 0.1, 0.01…
+const niceStep = (range) => Math.pow(10, Math.floor(Math.log10(Math.abs(range) / 100 || 0.01)))
+const fmtNum = (v) => (Math.abs(v) >= 100 ? v.toFixed(0) : +v.toFixed(2))
+
+function renderMaterialSettings() {
+  const clip = selectedClip()
+  const material = clip?.kind === 'material' ? materialLib.byId.get(clip.material) : null
+  const key = material ? `${clip.id}:${material.id}@${material.updatedAt}` : null
+  if (key === matSettingsKey) return
+  matSettingsKey = key
+  matGrid.querySelectorAll('.mat-tile[data-id]').forEach((t) => {
+    t.classList.toggle('sel', !!material && t.dataset.id === material.id)
+  })
+  matSettings.hidden = !material
+  if (!material) {
+    matParamsEl.innerHTML = ''
+    return
+  }
+  const inputs = materialInputs(material)
+  clip.params ||= {}
+  const val = (i) => clip.params[i.name] ?? i.default
+
+  matParamsEl.innerHTML =
+    `<div class="mp-head"><span>${esc(material.name)}</span>
+       <button type="button" class="link" data-act="edit">${material.builtin ? 'Duplicate' : 'Edit'}</button>
+       <button type="button" class="link" data-act="reset">Reset</button></div>` +
+    (inputs.length ? '' : '<div class="info">This material has no settings.</div>') +
+    inputs
+      .map((i) => {
+        const v = val(i)
+        const n = esc(i.name)
+        const label = `<span class="mp-label">${esc(i.label)}</span>`
+        if (i.type === 'float') {
+          const step = niceStep(i.max - i.min)
+          return `<label class="mp-row">${label}<input type="range" data-p="${n}" min="${i.min}" max="${i.max}" step="${step}" value="${v}"><output>${fmtNum(+v)}</output></label>`
+        }
+        if (i.type === 'long' && i.values) {
+          const opts = i.values
+            .map(
+              (o, k) =>
+                `<option value="${o}"${o == v ? ' selected' : ''}>${esc(i.labels?.[k] ?? o)}</option>`
+            )
+            .join('')
+          return `<label class="mp-row">${label}<select data-p="${n}">${opts}</select></label>`
+        }
+        if (i.type === 'long') {
+          return `<label class="mp-row">${label}<input type="range" data-p="${n}" min="${i.min}" max="${i.max}" step="1" value="${v}"><output>${v}</output></label>`
+        }
+        if (i.type === 'bool' || i.type === 'event') {
+          return `<label class="mp-row">${label}<input type="checkbox" data-p="${n}"${v ? ' checked' : ''}></label>`
+        }
+        if (i.type === 'color') {
+          return `<label class="mp-row">${label}<input type="color" data-p="${n}" value="${toHex(v)}"></label>`
+        }
+        // point2D
+        return [0, 1]
+          .map((k) => {
+            const step = niceStep(i.max[k] - i.min[k])
+            return `<label class="mp-row">${k ? '<span class="mp-label">&nbsp;&nbsp;y</span>' : `<span class="mp-label">${esc(i.label)} x</span>`}<input type="range" data-p="${n}" data-k="${k}" min="${i.min[k]}" max="${i.max[k]}" step="${step}" value="${v[k]}"><output>${fmtNum(+v[k])}</output></label>`
+          })
+          .join('')
+      })
+      .join('')
+
+  matParamsEl.oninput = (e) => {
+    const el = e.target
+    const input = inputs.find((i) => i.name === el.dataset.p)
+    if (!input) return
+    let v
+    if (input.type === 'float') v = +el.value
+    else if (input.type === 'long') v = Math.round(+el.value)
+    else if (input.type === 'bool' || input.type === 'event') v = el.checked
+    else if (input.type === 'color') v = fromHex(el.value, val(input)[3] ?? 1)
+    else {
+      v = [...val(input)]
+      v[+el.dataset.k] = +el.value
+    }
+    clip.params[input.name] = v
+    const out = el.parentElement.querySelector('output')
+    if (out) out.textContent = fmtNum(+el.value)
+  }
+  matParamsEl.onclick = (e) => {
+    const act = e.target.closest('[data-act]')?.dataset.act
+    if (act === 'reset') {
+      clip.params = defaultParams(inputs)
+      matSettingsKey = null
+      renderMaterialSettings()
+    } else if (act === 'edit') {
+      openMaterialEditor(
+        material.builtin ? { name: `${material.name} copy`, source: material.source } : material
+      )
+    }
+  }
+}
+
+// ---- Material editor ----
+const previewGL = matEd.preview.getContext('webgl')
+const previewRenderer = previewGL ? new MaterialRenderer(previewGL) : null
+let editing = null // material being edited, or null for a new one
+let previewEntry = null
+let previewStart = 0
+let previewRaf = null
+let compileTimer = null
+
+function compilePreview() {
+  if (!previewRenderer) return
+  if (previewEntry?.program) previewGL.deleteProgram(previewEntry.program)
+  previewEntry = previewRenderer.build(matEd.source.value)
+  matEd.errors.textContent = previewEntry.error || ''
+  matEd.errors.hidden = !previewEntry.error
+}
+
+function previewLoop(now) {
+  if (previewEntry && !previewEntry.error) {
+    previewGL.bindFramebuffer(previewGL.FRAMEBUFFER, null)
+    previewRenderer.draw(previewEntry, {
+      time: (now - previewStart) / 1000,
+      width: matEd.preview.width,
+      height: matEd.preview.height,
+    })
+  }
+  previewRaf = requestAnimationFrame(previewLoop)
+}
+
+function openMaterialEditor(material) {
+  editing = material?.id ? material : null
+  matEd.title.textContent = editing ? 'Edit material' : 'New material'
+  matEd.name.value = material?.name || 'My material'
+  matEd.source.value = material?.source || NEW_MATERIAL
+  matEd.del.hidden = !editing
+  matEditor.hidden = false
+  compilePreview()
+  previewStart = performance.now()
+  cancelAnimationFrame(previewRaf)
+  previewRaf = requestAnimationFrame(previewLoop)
+  matEd.source.focus()
+}
+
+function closeMaterialEditor() {
+  matEditor.hidden = true
+  cancelAnimationFrame(previewRaf)
+  editing = null
+}
+
+matEd.source.addEventListener('input', () => {
+  clearTimeout(compileTimer)
+  compileTimer = setTimeout(compilePreview, 250)
+})
+matEd.source.addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return
+  e.preventDefault()
+  const el = matEd.source
+  const { selectionStart: a, selectionEnd: b } = el
+  el.value = el.value.slice(0, a) + '  ' + el.value.slice(b)
+  el.selectionStart = el.selectionEnd = a + 2
+  el.dispatchEvent(new Event('input'))
+})
+
+async function saveMaterialFromEditor() {
+  compilePreview()
+  if (previewEntry?.error) {
+    matEd.errors.textContent = 'Fix these errors before saving:\n' + previewEntry.error
+    return
+  }
+  const body = JSON.stringify({ name: matEd.name.value, source: matEd.source.value })
+  matEd.save.disabled = true
+  try {
+    const res = await fetch(editing ? `/api/materials/${editing.id}` : '/api/materials', {
+      method: editing ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body,
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || `Couldn't save (${res.status})`)
+    closeMaterialEditor()
+    await loadMaterials()
+    toggleMaterialsPanel(true)
+    setStatus(`Saved material "${data.material.name}"`)
+    // Clips showing this material pick up the new name
+    layers.forEach((l) =>
+      l.clips.forEach((c) => {
+        if (c.material === data.material.id) c.name = data.material.name
+      })
+    )
+    renderTimeline()
+  } catch (err) {
+    matEd.errors.hidden = false
+    matEd.errors.textContent = err.message
+  } finally {
+    matEd.save.disabled = false
+  }
+}
+
+matEd.save.addEventListener('click', saveMaterialFromEditor)
+document.getElementById('mat-cancel').addEventListener('click', closeMaterialEditor)
+document.getElementById('mat-close').addEventListener('click', closeMaterialEditor)
+matEd.del.addEventListener('click', async () => {
+  if (!editing) return
+  if (!confirm(`Delete the material "${editing.name}"? Clips using it will show a placeholder.`)) {
+    return
+  }
+  const res = await fetch(`/api/materials/${editing.id}`, { method: 'DELETE' })
+  if (!res.ok && res.status !== 404) {
+    matEd.errors.hidden = false
+    matEd.errors.textContent = "Couldn't delete this material"
+    return
+  }
+  const name = editing.name
+  closeMaterialEditor()
+  await loadMaterials()
+  setStatus(`Deleted material "${name}"`)
+})
+document.getElementById('mat-download').addEventListener('click', () => {
+  const blob = new Blob([matEd.source.value], { type: 'text/plain' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = (matEd.name.value.trim() || 'material').replace(/[^\w-]+/g, '-') + '.fs'
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+})
 
 // Layer system
 const COLORS = ['#0f9', '#f90', '#90f', '#0ff', '#f09', '#9f0', '#09f', '#ff0']
@@ -575,6 +1020,49 @@ document.addEventListener('pointermove', (e) => handleDrag(e.clientX, e.clientY)
 document.addEventListener('pointerup', endDrag)
 document.addEventListener('pointercancel', endDrag)
 
+// Size a material is rendered at: roughly the layer's size on screen
+function materialSize(layer, w, h) {
+  const xs = layer.corners.map((c) => c.x * w)
+  const ys = layer.corners.map((c) => c.y * h)
+  const q = (v) => Math.max(32, Math.min(1024, Math.round(v / 16) * 16))
+  return { w: q(Math.max(...xs) - Math.min(...xs)), h: q(Math.max(...ys) - Math.min(...ys)) }
+}
+
+let frameIndex = 0
+
+// Draw each visible material clip into its own texture
+function renderMaterials(w, h) {
+  const drawn = new Map()
+  layers.forEach((layer) => {
+    if (!layer.visible) return
+    const clip = clipAt(layer, tl.t)
+    if (!clip || clip.kind !== 'material') return
+    const material = materialLib.byId.get(clip.material)
+    const entry = material && matRenderer.compile(material)
+    if (!entry || entry.error) return
+    const size = materialSize(layer, w, h)
+    clip.target ||= new MaterialTarget(gl)
+    clip.target.bind(size.w, size.h)
+    matRenderer.draw(entry, {
+      time: Math.max(0, tl.t - clip.start + clip.in),
+      frame: frameIndex,
+      width: size.w,
+      height: size.h,
+      params: clip.params,
+    })
+    drawn.set(layer, clip.target.texture)
+  })
+  if (!drawn.size) return drawn
+  // Back to the screen and the mapping program
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null)
+  gl.useProgram(prog)
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf)
+  gl.enableVertexAttribArray(aPos)
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0)
+  gl.enable(gl.BLEND)
+  return drawn
+}
+
 // Render (called every frame from the playback loop)
 function render() {
   const w = wrap.clientWidth,
@@ -582,8 +1070,10 @@ function render() {
   if (canvas.width !== w || canvas.height !== h) {
     canvas.width = w
     canvas.height = h
-    gl.viewport(0, 0, w, h)
   }
+  frameIndex++
+  const materialTextures = renderMaterials(w, h)
+  gl.viewport(0, 0, w, h)
 
   gl.clearColor(0, 0, 0, 1)
   gl.clear(gl.COLOR_BUFFER_BIT)
@@ -592,15 +1082,22 @@ function render() {
     if (!layer.visible) return
     const clip = clipAt(layer, tl.t)
     if (!clip) return
-    const m = clip.media
-    const isVideo = m.tagName === 'VIDEO'
-    const ready = !isVideo || m.readyState >= 2
-    if (!ready && layer.uploaded !== m) return
+    if (materialTextures.has(layer)) {
+      gl.bindTexture(gl.TEXTURE_2D, materialTextures.get(layer))
+      gl.uniform1f(uFlipY, 1)
+    } else {
+      // Media, or the placeholder of a material that can't be drawn
+      const m = clip.media
+      const isVideo = m.tagName === 'VIDEO'
+      const ready = !isVideo || m.readyState >= 2
+      if (!ready && layer.uploaded !== m) return
 
-    gl.bindTexture(gl.TEXTURE_2D, layer.texture)
-    if (ready && (isVideo || layer.uploaded !== m)) {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, m)
-      layer.uploaded = m
+      gl.bindTexture(gl.TEXTURE_2D, layer.texture)
+      if (ready && (isVideo || layer.uploaded !== m)) {
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, m)
+        layer.uploaded = m
+      }
+      gl.uniform1f(uFlipY, 0)
     }
 
     const data = new Float32Array([
@@ -695,6 +1192,8 @@ function findClip(id) {
 }
 
 function disposeClipMedia(c) {
+  if (c.target) c.target.dispose()
+  c.target = null
   if (c.stream) c.stream.getTracks().forEach((t) => t.stop())
   if (c.media && c.media.tagName === 'VIDEO') c.media.pause()
   if (c.url) URL.revokeObjectURL(c.url)
@@ -724,7 +1223,7 @@ function setClipSource(target, src) {
   const videoDur = src.kind === 'video' && isFinite(src.srcDur) ? src.srcDur : null
   if (clip) {
     disposeClipMedia(clip)
-    Object.assign(clip, { ref: null }, src, { in: 0 })
+    Object.assign(clip, { ref: null, material: null, params: null }, src, { in: 0 })
     if (videoDur) clip.dur = videoDur
   } else {
     const layer = target.layer
@@ -732,7 +1231,15 @@ function setClipSource(target, src) {
       disposeClipMedia(src)
       return
     }
-    clip = { id: ++tl.clipCounter, in: 0, dur: videoDur || STILL_DUR, ref: null, ...src }
+    clip = {
+      id: ++tl.clipCounter,
+      in: 0,
+      dur: videoDur || STILL_DUR,
+      ref: null,
+      material: null,
+      params: null,
+      ...src,
+    }
     // Drop at the playhead if that spot is free, otherwise after the track's last clip
     clip.start = clipAt(layer, tl.t)
       ? Math.max(0, ...layer.clips.map((c) => c.start + c.dur))
@@ -856,6 +1363,7 @@ function renderTimeline() {
     )
     .join('')
   tlDur.textContent = '/ ' + fmt(seqEnd())
+  renderMaterialSettings()
   updatePlayhead()
 }
 
@@ -1202,6 +1710,10 @@ function serializeMapping() {
       clips: l.clips.map((c) => {
         const out = { kind: c.kind, name: c.name, start: c.start, dur: c.dur, in: c.in }
         if (c.kind === 'color') out.color = c.name
+        if (c.kind === 'material') {
+          out.material = c.material
+          out.params = c.params || {}
+        }
         if (c.kind === 'video' || c.kind === 'image') out.media = c.ref || `unsaved:${c.id}`
         return out
       }),
@@ -1356,6 +1868,10 @@ function waitFor(el, event) {
 
 async function loadClipSource(c) {
   if (c.kind === 'color') return colorSource(c.color)
+  if (c.kind === 'material') {
+    const material = materialLib.byId.get(c.material) || { id: c.material, name: c.name }
+    return { ...materialSource(material, c.params || {}), name: c.name }
+  }
 
   if (c.kind === 'camera') {
     try {
@@ -1543,6 +2059,7 @@ window.addEventListener('popstate', () => {
 })
 
 async function startMapping() {
+  await loadMaterials()
   if (current.id) await openMapping(current.id)
   else {
     createLayer()
@@ -1555,15 +2072,23 @@ document.addEventListener('keydown', (e) => {
   // Ctrl/⌘+S saves, Ctrl/⌘+Shift+S saves a copy (works while typing too)
   if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
     e.preventDefault()
-    saveMapping({ asNew: e.shiftKey })
+    if (!matEditor.hidden) saveMaterialFromEditor()
+    else saveMapping({ asNew: e.shiftKey })
     return
   }
-  if (e.target.tagName === 'INPUT') return
+  // The material editor takes over the keyboard while it's open
+  if (!matEditor.hidden) {
+    if (e.key === 'Escape') closeMaterialEditor()
+    return
+  }
+  if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return
   const key = e.key.toLowerCase()
   if (key === 'h') toggleUI()
   if (key === 'f') toggleFullscreen()
   if (key === 'p') toggleCorners()
   if (key === 't') toggleTimeline()
+  if (key === 'm') toggleMaterialsPanel()
+  if (key === 'escape' && !matPanel.hidden) toggleMaterialsPanel(false)
   if (key === 'r') e.shiftKey ? resetActiveShape() : resetActiveCorners()
   if (key === ' ') {
     e.preventDefault()

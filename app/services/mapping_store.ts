@@ -24,7 +24,7 @@ import env from '#start/env'
 */
 
 export const FORMAT_VERSION = 1
-export const CLIP_KINDS = ['video', 'image', 'color', 'camera'] as const
+export const CLIP_KINDS = ['video', 'image', 'color', 'camera', 'material'] as const
 
 export type ClipKind = (typeof CLIP_KINDS)[number]
 
@@ -36,7 +36,13 @@ export interface ClipData {
   in: number
   media?: string
   color?: string
+  /** Material library id, for material clips */
+  material?: string
+  /** Material settings (ISF input values) */
+  params?: Record<string, MaterialParam>
 }
+
+export type MaterialParam = number | boolean | number[]
 
 export interface MaskPoint {
   x: number
@@ -89,6 +95,9 @@ const MAX_LAYERS = 64
 const MAX_CLIPS = 1000
 const MAX_NAME = 120
 const MAX_MASK_POINTS = 32
+const MATERIAL_RE = /^[A-Za-z0-9_-]{1,64}$/
+const PARAM_RE = /^[A-Za-z_]\w{0,63}$/
+const MAX_PARAMS = 64
 
 export class ValidationError extends Error {}
 
@@ -115,6 +124,26 @@ export function cleanName(v: unknown) {
   const name = str(v, '')
   if (!name) throw new ValidationError('Give the mapping a name')
   return name
+}
+
+function cleanParams(input: unknown): Record<string, MaterialParam> {
+  const out: Record<string, MaterialParam> = {}
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return out
+  for (const [key, value] of Object.entries(input).slice(0, MAX_PARAMS)) {
+    if (!PARAM_RE.test(key)) continue
+    if (typeof value === 'boolean') out[key] = value
+    else if (typeof value === 'number' && Number.isFinite(value))
+      out[key] = num(value, 0, -1e6, 1e6)
+    else if (
+      Array.isArray(value) &&
+      value.length >= 2 &&
+      value.length <= 4 &&
+      value.every((v) => typeof v === 'number' && Number.isFinite(v))
+    ) {
+      out[key] = value.map((v) => num(v, 0, -1e6, 1e6))
+    }
+  }
+  return out
 }
 
 function cleanMask(input: unknown, layerIndex: number): MaskPoint[] | null {
@@ -179,6 +208,13 @@ export function cleanMappingData(input: unknown): MappingData {
         if (c.kind === 'color') {
           clip.color = typeof c.color === 'string' && HEX_RE.test(c.color) ? c.color : '#ffffff'
         }
+        if (c.kind === 'material') {
+          if (typeof c.material !== 'string' || !MATERIAL_RE.test(c.material)) {
+            throw new ValidationError(`"${clip.name}" doesn't say which material it uses`)
+          }
+          clip.material = c.material
+          clip.params = cleanParams(c.params)
+        }
         return clip
       }),
     }
@@ -192,6 +228,12 @@ export function cleanMappingData(input: unknown): MappingData {
     },
     layers,
   }
+}
+
+export function materialRefs(data: MappingData) {
+  const ids = new Set<string>()
+  data.layers.forEach((l) => l.clips.forEach((c) => c.material && ids.add(c.material)))
+  return [...ids]
 }
 
 export function mediaRefs(data: MappingData) {

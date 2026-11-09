@@ -10,6 +10,7 @@
 import router from '@adonisjs/core/services/router'
 
 const MappingsController = () => import('#controllers/mappings_controller')
+const MaterialsController = () => import('#controllers/materials_controller')
 
 /**
  * The mappings library is the homepage; the old landing page lives at /about
@@ -38,6 +39,12 @@ router
     router.get('/mappings/:id/thumbnail', [MappingsController, 'thumbnail'])
     router.get('/mappings/:id/export', [MappingsController, 'export'])
     router.post('/media', [MappingsController, 'mediaUpload'])
+
+    router.get('/materials', [MaterialsController, 'index'])
+    router.post('/materials', [MaterialsController, 'store'])
+    router.get('/materials/:id', [MaterialsController, 'show'])
+    router.put('/materials/:id', [MaterialsController, 'update'])
+    router.delete('/materials/:id', [MaterialsController, 'destroy'])
   })
   .prefix('/api')
 

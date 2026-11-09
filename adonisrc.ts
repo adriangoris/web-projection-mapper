@@ -98,6 +98,10 @@ export default defineConfig({
       pattern: 'public/**',
       reloadServer: false,
     },
+    {
+      pattern: 'resources/materials/*.fs',
+      reloadServer: false,
+    },
   ],
 
   /*

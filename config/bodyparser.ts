@@ -10,6 +10,7 @@ const bodyParserConfig = defineConfig({
   json: {
     limit: '5mb',
     convertEmptyStringsToNull: false,
+    trimWhitespaces: false,
   },
 })
 
