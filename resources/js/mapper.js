@@ -116,11 +116,12 @@ function esc(s) {
   )
 }
 
+// New layers start centred at 40% of the canvas width and height
 const defaultCorners = () => [
-  { x: 0.1, y: 0.1 },
-  { x: 0.9, y: 0.1 },
-  { x: 0.9, y: 0.9 },
-  { x: 0.1, y: 0.9 },
+  { x: 0.3, y: 0.3 },
+  { x: 0.7, y: 0.3 },
+  { x: 0.7, y: 0.7 },
+  { x: 0.3, y: 0.7 },
 ]
 
 // `empty` skips the starter color clip (used when opening a saved mapping)
