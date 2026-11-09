@@ -98,7 +98,8 @@ const defaultCorners = () => [
   { x: 0.1, y: 0.9 },
 ]
 
-function createLayer() {
+// `empty` skips the starter color clip (used when opening a saved mapping)
+function createLayer({ empty = false } = {}) {
   const id = ++layerCounter
   const color = COLORS[(id - 1) % COLORS.length]
   const tex = gl.createTexture()
@@ -121,7 +122,7 @@ function createLayer() {
 
   layers.push(layer)
   setActiveLayer(id)
-  setClipSource({ layer, clip: null }, colorSource())
+  if (!empty) setClipSource({ layer, clip: null }, colorSource())
   return layer
 }
 
@@ -197,12 +198,11 @@ function renderLayersList() {
   renderTimeline()
 }
 
-function colorSource() {
+function colorSource(color = randomColor()) {
   const c = document.createElement('canvas')
   c.width = 64
   c.height = 64
   const ctx = c.getContext('2d')
-  const color = randomColor()
   ctx.fillStyle = color
   ctx.fillRect(0, 0, 64, 64)
   return { kind: 'color', media: c, name: color, url: null, stream: null, srcDur: Infinity }
@@ -411,7 +411,7 @@ function setClipSource(target, src) {
   const videoDur = src.kind === 'video' && isFinite(src.srcDur) ? src.srcDur : null
   if (clip) {
     disposeClipMedia(clip)
-    Object.assign(clip, src, { in: 0 })
+    Object.assign(clip, { ref: null }, src, { in: 0 })
     if (videoDur) clip.dur = videoDur
   } else {
     const layer = target.layer
@@ -419,7 +419,7 @@ function setClipSource(target, src) {
       disposeClipMedia(src)
       return
     }
-    clip = { id: ++tl.clipCounter, in: 0, dur: videoDur || STILL_DUR, ...src }
+    clip = { id: ++tl.clipCounter, in: 0, dur: videoDur || STILL_DUR, ref: null, ...src }
     // Drop at the playhead if that spot is free, otherwise after the track's last clip
     clip.start = clipAt(layer, tl.t)
       ? Math.max(0, ...layer.clips.map((c) => c.start + c.dur))
@@ -452,7 +452,7 @@ function syncMedia() {
     const active = clipAt(layer, tl.t)
     layer.clips.forEach((c) => {
       const v = c.media
-      if (c.kind !== 'video' || !v) return
+      if (c.kind !== 'video' || !v || v.tagName !== 'VIDEO') return
       if (c !== active) {
         if (!v.paused) v.pause()
         return
@@ -849,10 +849,397 @@ document.getElementById('toggle-ui').addEventListener('click', toggleUI)
 document.getElementById('toggle-tl').addEventListener('click', toggleTimeline)
 document.getElementById('toggle-corners').addEventListener('click', toggleCorners)
 document.getElementById('fullscreen-btn').addEventListener('click', toggleFullscreen)
-document.getElementById('add-layer-btn').addEventListener('click', createLayer)
+document.getElementById('add-layer-btn').addEventListener('click', () => createLayer())
+
+// ================= Saved mappings =================
+// A mapping is the whole scene: layers, corners, clips and timeline settings.
+// It's saved on the server (see /mappings). Media files are uploaded once
+// and referenced by checksum, so re-saving doesn't upload them again.
+const appEl = document.getElementById('app')
+const nameInput = document.getElementById('mapping-name')
+const dirtyDot = document.getElementById('mapping-dirty')
+const statusEl = document.getElementById('mapping-status')
+const importInput = document.getElementById('import-input')
+
+const current = { id: appEl.dataset.mappingId || null }
+let savedSnapshot = ''
+let busy = false
+let statusTimer = null
+
+function setStatus(msg, { error = false, sticky = false } = {}) {
+  clearTimeout(statusTimer)
+  statusEl.textContent = msg
+  statusEl.classList.toggle('error', error)
+  if (msg && !error && !sticky) statusTimer = setTimeout(() => setStatus(''), 2500)
+}
+
+function serializeMapping() {
+  return {
+    version: 1,
+    timeline: { loop: tl.loop, pps: Math.round(tl.pps * 100) / 100 },
+    layers: layers.map((l) => ({
+      name: l.name,
+      color: l.color,
+      visible: l.visible,
+      corners: l.corners.map((c) => ({ x: c.x, y: c.y })),
+      clips: l.clips.map((c) => {
+        const out = { kind: c.kind, name: c.name, start: c.start, dur: c.dur, in: c.in }
+        if (c.kind === 'color') out.color = c.name
+        if (c.kind === 'video' || c.kind === 'image') out.media = c.ref || `unsaved:${c.id}`
+        return out
+      }),
+    })),
+  }
+}
+
+// What counts as an unsaved change (zoom level alone doesn't)
+function snapshot() {
+  const data = serializeMapping()
+  delete data.timeline.pps
+  return JSON.stringify([nameInput.value.trim(), data])
+}
+
+function isDirty() {
+  return snapshot() !== savedSnapshot
+}
+
+function updateDirty() {
+  const dirty = isDirty()
+  dirtyDot.hidden = !dirty
+  const name = nameInput.value.trim() || 'Untitled mapping'
+  document.title = `${dirty ? '• ' : ''}${name} · Projection Mapping`
+}
+
+function markSaved() {
+  savedSnapshot = snapshot()
+  updateDirty()
+}
+setInterval(updateDirty, 500)
+
+window.addEventListener('beforeunload', (e) => {
+  if (isDirty() || busy) e.preventDefault()
+})
+
+nameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === 'Escape') nameInput.blur()
+})
+
+function fileExt(name, type) {
+  const m = /\.([a-z0-9]{1,10})$/i.exec(name || '')
+  if (m) return m[1].toLowerCase()
+  return (
+    (type || '')
+      .split('/')[1]
+      ?.replace(/[^a-z0-9]/gi, '')
+      .slice(0, 10) || 'bin'
+  )
+}
+
+// Upload any video/image clips the server doesn't have yet
+async function uploadClipMedia() {
+  const pending = []
+  layers.forEach((l) =>
+    l.clips.forEach((c) => {
+      if ((c.kind === 'video' || c.kind === 'image') && !c.ref) pending.push(c)
+    })
+  )
+  const byUrl = new Map()
+  for (let i = 0; i < pending.length; i++) {
+    const c = pending[i]
+    if (byUrl.has(c.url)) {
+      c.ref = byUrl.get(c.url)
+      continue
+    }
+    setStatus(`Uploading media ${i + 1} of ${pending.length}…`, { sticky: true })
+    const blob = await fetch(c.url).then((r) => r.blob())
+    const res = await fetch(`/api/media?ext=${encodeURIComponent(fileExt(c.name, blob.type))}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: blob,
+    })
+    if (!res.ok) throw new Error(`Couldn't upload ${c.name}`)
+    c.ref = (await res.json()).media
+    byUrl.set(c.url, c.ref)
+  }
+}
+
+function thumbnail() {
+  const w = 320
+  const h = Math.max(1, Math.round((canvas.height / Math.max(1, canvas.width)) * w))
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  c.getContext('2d').drawImage(canvas, 0, 0, w, h)
+  return c.toDataURL('image/jpeg', 0.8)
+}
+
+async function saveMapping({ asNew = false } = {}) {
+  if (busy) return false
+  let name = nameInput.value.trim()
+  if (asNew) {
+    name = prompt('Save a copy as', name ? `${name} copy` : 'Untitled mapping')?.trim()
+    if (!name) return false
+  } else if (!name) {
+    name = prompt('Name this mapping', 'Untitled mapping')?.trim()
+    if (!name) return false
+  }
+
+  busy = true
+  try {
+    await uploadClipMedia()
+    setStatus('Saving…', { sticky: true })
+    const update = current.id && !asNew
+    const res = await fetch(update ? `/api/mappings/${current.id}` : '/api/mappings', {
+      method: update ? 'PUT' : 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ name, data: serializeMapping(), thumbnail: thumbnail() }),
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(body.error || `Save failed (${res.status})`)
+
+    current.id = body.mapping.id
+    nameInput.value = body.mapping.name
+    appEl.dataset.mappingId = current.id
+    if (location.pathname !== `/app/${current.id}`) {
+      history.replaceState(null, '', `/app/${current.id}`)
+    }
+    markSaved()
+    setStatus(asNew ? `Saved a copy as "${body.mapping.name}"` : 'Saved')
+    return true
+  } catch (err) {
+    console.error(err)
+    setStatus(err.message || "Couldn't save. Try again.", { error: true })
+    return false
+  } finally {
+    busy = false
+  }
+}
+
+// ---- Opening a saved mapping ----
+function placeholderSource(kind, name, label) {
+  const c = document.createElement('canvas')
+  c.width = 256
+  c.height = 144
+  const ctx = c.getContext('2d')
+  ctx.fillStyle = '#222'
+  ctx.fillRect(0, 0, 256, 144)
+  ctx.fillStyle = '#f66'
+  ctx.font = '16px system-ui, sans-serif'
+  ctx.textAlign = 'center'
+  ctx.fillText(label, 128, 78)
+  return { kind, media: c, name, url: null, stream: null, srcDur: Infinity, missing: true }
+}
+
+function waitFor(el, event) {
+  return new Promise((resolve, reject) => {
+    el.addEventListener(event, resolve, { once: true })
+    el.addEventListener('error', () => reject(new Error('Media failed to load')), { once: true })
+  })
+}
+
+async function loadClipSource(c) {
+  if (c.kind === 'color') return colorSource(c.color)
+
+  if (c.kind === 'camera') {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+      })
+      const video = document.createElement('video')
+      video.srcObject = stream
+      video.playsInline = true
+      video.muted = true
+      await waitFor(video, 'loadedmetadata')
+      video.play().catch(() => {})
+      return { kind: 'camera', media: video, name: c.name, url: null, stream, srcDur: Infinity }
+    } catch {
+      return placeholderSource('camera', c.name, 'Camera unavailable')
+    }
+  }
+
+  // Video or image stored on the server
+  let url = null
+  try {
+    const res = await fetch(`/media/${c.media}`)
+    if (!res.ok) throw new Error('Media missing')
+    url = URL.createObjectURL(await res.blob())
+    if (c.kind === 'video') {
+      const video = document.createElement('video')
+      video.muted = true
+      video.playsInline = true
+      video.preload = 'auto'
+      const ready = waitFor(video, 'loadeddata')
+      video.src = url
+      await ready
+      return {
+        kind: 'video',
+        media: video,
+        name: c.name,
+        url,
+        stream: null,
+        srcDur: video.duration,
+      }
+    }
+    const img = new Image()
+    const ready = waitFor(img, 'load')
+    img.src = url
+    await ready
+    return { kind: 'image', media: img, name: c.name, url, stream: null, srcDur: Infinity }
+  } catch {
+    if (url) URL.revokeObjectURL(url)
+    return placeholderSource(c.kind, c.name, 'Media missing')
+  }
+}
+
+function clearMapping() {
+  setPlaying(false)
+  layers.slice().forEach((l) => deleteLayer(l.id))
+  layerCounter = 0
+  tl.clipCounter = 0
+  tl.sel = null
+  setTime(0)
+}
+
+async function openMapping(id) {
+  busy = true
+  setStatus('Opening…', { sticky: true })
+  try {
+    const res = await fetch(`/api/mappings/${id}`, { headers: { Accept: 'application/json' } })
+    if (!res.ok) throw new Error("Couldn't open this mapping")
+    const { mapping } = await res.json()
+    const data = mapping.data
+
+    const total = data.layers.reduce((n, l) => n + l.clips.length, 0)
+    let loaded = 0
+    const sources = await Promise.all(
+      data.layers.map((l) =>
+        Promise.all(
+          l.clips.map(async (c) => {
+            const src = await loadClipSource(c)
+            setStatus(`Loading media ${++loaded} of ${total}…`, { sticky: true })
+            return src
+          })
+        )
+      )
+    )
+
+    clearMapping()
+    tl.loop = data.timeline.loop
+    tlLoopBtn.classList.toggle('on', tl.loop)
+    tl.pps = data.timeline.pps
+    tlZoom.value = Math.log(tl.pps)
+
+    data.layers.forEach((l, i) => {
+      const layer = createLayer({ empty: true })
+      Object.assign(layer, {
+        name: l.name,
+        color: l.color,
+        visible: l.visible,
+        corners: l.corners.map((c) => ({ x: c.x, y: c.y })),
+      })
+      layer.clips = l.clips.map((c, j) => {
+        const { missing, ...src } = sources[i][j]
+        return {
+          id: ++tl.clipCounter,
+          start: c.start,
+          dur: c.dur,
+          in: c.in,
+          ref: c.media || null,
+          ...src,
+        }
+      })
+    })
+    tl.sel = null
+    if (layers[0]) setActiveLayer(layers[0].id)
+    else renderLayersList()
+
+    current.id = mapping.id
+    nameInput.value = mapping.name
+    markSaved()
+    const missing = sources.flat().filter((s) => s.missing).length
+    if (missing) {
+      setStatus(`${missing} clip(s) couldn't load their media or camera`, { error: true })
+    } else setStatus('')
+  } catch (err) {
+    console.error(err)
+    setStatus(err.message, { error: true })
+  } finally {
+    busy = false
+  }
+}
+
+// ---- Save buttons, export and import ----
+document.getElementById('save-btn').addEventListener('click', () => saveMapping())
+document.getElementById('save-as-btn').addEventListener('click', () => saveMapping({ asNew: true }))
+
+document.getElementById('export-btn').addEventListener('click', async () => {
+  if (busy) return
+  // Export what's on screen, so save any changes first
+  if (!current.id || isDirty()) {
+    if (!(await saveMapping())) return
+  }
+  const a = document.createElement('a')
+  a.href = `/api/mappings/${current.id}/export`
+  a.download = ''
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setStatus('Downloading projection file…')
+})
+
+document.getElementById('import-btn').addEventListener('click', () => {
+  if (!busy) importInput.click()
+})
+
+importInput.addEventListener('change', async () => {
+  const file = importInput.files[0]
+  importInput.value = ''
+  if (!file) return
+  if (isDirty() && !confirm('Discard unsaved changes and open the imported mapping?')) return
+  busy = true
+  setStatus(`Importing ${file.name}…`, { sticky: true })
+  let imported = null
+  try {
+    const res = await fetch('/api/mappings/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream', 'Accept': 'application/json' },
+      body: file,
+    })
+    const body = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(body.error || `Import failed (${res.status})`)
+    imported = body.mapping
+  } catch (err) {
+    setStatus(err.message, { error: true })
+  } finally {
+    busy = false
+  }
+  if (!imported) return
+  history.pushState(null, '', `/app/${imported.id}`)
+  await openMapping(imported.id)
+  setStatus(`Imported "${imported.name}"`)
+})
+
+window.addEventListener('popstate', () => {
+  const m = /^\/app\/([\w-]+)$/.exec(location.pathname)
+  if (m && m[1] !== current.id) openMapping(m[1])
+})
+
+async function startMapping() {
+  if (current.id) await openMapping(current.id)
+  else {
+    createLayer()
+    markSaved()
+  }
+}
 
 // Keyboard
 document.addEventListener('keydown', (e) => {
+  // Ctrl/⌘+S saves, Ctrl/⌘+Shift+S saves a copy (works while typing too)
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    saveMapping({ asNew: e.shiftKey })
+    return
+  }
   if (e.target.tagName === 'INPUT') return
   const key = e.key.toLowerCase()
   if (key === 'h') toggleUI()
@@ -893,5 +1280,5 @@ window.addEventListener('resize', () => {
 })
 
 tlZoom.value = Math.log(tl.pps)
-createLayer()
 requestAnimationFrame(frame)
+startMapping()

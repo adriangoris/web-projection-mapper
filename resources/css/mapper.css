@@ -408,3 +408,71 @@ body.tl-hidden #timeline {
   pointer-events: none;
   clip-path: polygon(0 0, 100% 0, 100% 60%, 50% 100%, 0 60%);
 }
+
+/* ---------- Saved mappings ---------- */
+.mapping-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.lib-link {
+  font-size: 11px;
+  color: #8ab;
+  text-decoration: none;
+  border: 1px solid #334;
+  border-radius: 5px;
+  padding: 3px 8px;
+}
+.lib-link:hover {
+  color: #fff;
+  border-color: #0f9;
+}
+.mapping-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid #334;
+  border-radius: 6px;
+  background: rgba(10, 14, 30, 0.5);
+}
+.mapping-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+#mapping-name {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid #334;
+  border-radius: 5px;
+  background: #1a1a2e;
+  color: #fff;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+#mapping-name:focus {
+  outline: none;
+  border-color: #0f9;
+}
+#mapping-dirty {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f90;
+  flex-shrink: 0;
+}
+#mapping-dirty[hidden] {
+  display: none;
+}
+#mapping-status {
+  min-height: 14px;
+  font-size: 11px;
+  color: #8ab;
+}
+#mapping-status.error {
+  color: #f66;
+}

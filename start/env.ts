@@ -21,4 +21,7 @@ export default await Env.create(new URL('../', import.meta.url), {
   // App
   APP_KEY: Env.schema.secret(),
   APP_URL: Env.schema.string({ format: 'url', tld: false }),
+
+  // Where saved mappings and their media live (default: ./storage)
+  STORAGE_PATH: Env.schema.string.optional(),
 })

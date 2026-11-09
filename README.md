@@ -16,6 +16,8 @@ A powerful, browser-based projection mapping tool built with WebGL. Create stunn
 - **Real-Time Warping** - Drag corner points to map your content onto any surface
 - **Layer Management** - Show/hide, reorder, and delete layers
 - **Timeline Playback** - Sequence clips on per-layer tracks with a time ruler, playhead scrubbing, looping, and zoom
+- **Saved Mappings** - Save the whole scene (layers, corners, clips, timeline) under a name and reopen it from the Mappings library
+- **Projection Files** - Export a mapping with all its media as a single `.pmap` file and import it on another machine
 - **Keyboard Shortcuts** - Fast workflow with hotkeys
 - **Fullscreen Mode** - Perfect for live presentations
 - **No Installation** - Runs entirely in your browser
@@ -42,6 +44,28 @@ The Timeline panel runs along the bottom of the screen:
 - **Clips** - Each source you load becomes a clip. Drag a clip to move it (it snaps to the playhead and other clip edges), drag it onto another track to change its layer, and drag its edges to trim it
 - Source buttons replace the **selected clip**. If no clip is selected, they add a new clip at the playhead (click an empty spot on a track to deselect)
 
+## Saved Mappings
+
+A mapping is everything you build in the app: its layers, corner positions, clips and timeline settings.
+
+- **Save** (`Ctrl`/`⌘` + `S`) - Name the mapping in the box at the top of the panel and save it. The orange dot means there are unsaved changes
+- **Save as** (`Ctrl`/`⌘` + `Shift` + `S`) - Save a copy under a new name
+- **Mappings library** - Open `/mappings` (the **Mappings** button in the panel) to see every saved mapping with a preview. Open, export or delete them from there, or start a new one
+- Each saved mapping has its own link, `/app/<id>`, so you can open it on the projector machine
+- Camera clips are saved as placeholders and ask for the camera again when the mapping opens
+
+Saved mappings live on the server in `storage/` (set `STORAGE_PATH` to move it):
+
+```
+storage/mappings/<id>.json     mapping document
+storage/mappings/<id>.jpg      preview thumbnail
+storage/media/<sha256>.<ext>   video and image files, stored once and shared between mappings
+```
+
+### Projection files (.pmap)
+
+**Export** downloads a `.pmap` file: a zip holding `mapping.json`, the thumbnail and every media file the mapping uses. **Import** (in the app or the library) turns a `.pmap` file back into a new saved mapping, so you can move work between machines or keep backups.
+
 ## Keyboard Shortcuts
 
 | Key            | Action                                                     |
@@ -56,6 +80,7 @@ The Timeline panel runs along the bottom of the screen:
 | `←` / `→`      | Step one frame (hold `Shift` for 1s)                       |
 | `Home` / `End` | Jump to start / end                                        |
 | `Delete`       | Delete selected clip (or active layer if no clip selected) |
+| `Ctrl`/`⌘`+`S` | Save mapping (add `Shift` to save a copy)                  |
 
 ## Controls
 
@@ -70,7 +95,7 @@ The Timeline panel runs along the bottom of the screen:
 - Frontend assets bundled by Vite through `@adonisjs/vite`
 - Rendering is still vanilla JavaScript and WebGL, using a perspective-correction shader for accurate mapping
 - Supports real-time video playback with hardware-accelerated rendering
-- All media stays in the browser: nothing is uploaded to the server
+- Media you load stays in the browser until you save; saving uploads it to the server running the app
 
 ## Development
 
@@ -103,17 +128,26 @@ cp ../.env .env            # set NODE_ENV=production, HOST, PORT, APP_KEY, APP_U
 node bin/server.js
 ```
 
+Saved mappings go to `build/storage/` unless `STORAGE_PATH` points somewhere else. Set it to a folder outside `build/` (for example `STORAGE_PATH=/var/lib/projection-mapper`) so rebuilding doesn't touch your saved work.
+
 ### Project structure
 
 ```
-start/routes.ts                     Routes: / (landing) and /app (mapper)
+start/routes.ts                     Routes: pages and the /api mappings + media API
+app/controllers/mappings_controller.ts  Library page, editor page, mappings API
+app/services/mapping_store.ts       Saves mappings and media under storage/
+app/services/projection_file.ts     .pmap export / import
+app/services/zip.ts                 Minimal zip reader / writer
 resources/views/pages/home.edge     Landing page
 resources/views/pages/mapper.edge   Projection mapping app markup
+resources/views/pages/mappings.edge Mappings library
 resources/views/components/layouts/main.edge  Shared HTML layout
-resources/js/mapper.js              WebGL renderer, layers, timeline
-resources/css/                      Page styles (home.css, mapper.css)
+resources/js/mapper.js              WebGL renderer, layers, timeline, save / open
+resources/js/library.js             Library page (delete, import)
+resources/css/                      Page styles (home.css, mapper.css, library.css)
 public/                             Static files (demo.gif)
-tests/functional/                   HTTP tests
+storage/                            Saved mappings and media (git-ignored)
+tests/                              Unit and HTTP tests
 ```
 
 The old static URLs `/index.html` and `/app.html` redirect to `/` and `/app`.

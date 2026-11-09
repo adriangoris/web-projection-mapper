@@ -2,9 +2,38 @@
   title: 'Projection Mapping',
   entrypoints: ['resources/css/mapper.css', 'resources/js/mapper.js'],
 })
-  <div id="app">
+  <div id="app" data-mapping-id="{{ mapping ? mapping.id : '' }}">
     <div id="controls">
-      <h1>🎥 Projection Mapping</h1>
+      <div class="mapping-top">
+        <h1>🎥 Projection Mapping</h1>
+        <a href="{{ urlFor('mappings') }}" class="lib-link" title="All saved mappings">Mappings</a>
+      </div>
+
+      <div class="mapping-box">
+        <div class="mapping-name-row">
+          <input
+            id="mapping-name"
+            type="text"
+            maxlength="120"
+            placeholder="Untitled mapping"
+            aria-label="Mapping name"
+            autocomplete="off"
+          />
+          <span id="mapping-dirty" title="Unsaved changes" hidden></span>
+        </div>
+        <div class="row">
+          <button id="save-btn" class="primary" title="Save (Ctrl/⌘ + S)">Save</button>
+          <button id="save-as-btn" class="secondary" title="Save a copy (Ctrl/⌘ + Shift + S)">
+            Save as…
+          </button>
+        </div>
+        <div class="row">
+          <button id="export-btn" title="Download a .pmap projection file">⇩ Export</button>
+          <button id="import-btn" title="Open a .pmap projection file">⇧ Import</button>
+        </div>
+        <input type="file" id="import-input" accept=".pmap,application/zip" hidden />
+        <div id="mapping-status" class="info" role="status" aria-live="polite"></div>
+      </div>
 
       <div>
         <h2>Layers</h2>
@@ -42,6 +71,7 @@
         <div>H — panel | F — fullscreen | R — reset</div>
         <div>P — points | 1-9 — layer | Del — delete</div>
         <div>T — timeline | Space — play/pause</div>
+        <div>Ctrl/⌘+S — save (Shift: save as)</div>
         <div>←/→ — step (Shift: 1s) | Home/End</div>
       </div>
     </div>

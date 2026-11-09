@@ -28,3 +28,6 @@ public/assets
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Saved mappings and media
+storage

@@ -1,0 +1,69 @@
+@layouts.main({
+  title: 'Your mappings · Projection Mapping',
+  entrypoints: ['resources/css/library.css', 'resources/js/library.js'],
+})
+  <div class="lib">
+    <header class="lib-head">
+      <a href="{{ urlFor('home') }}" class="lib-brand">🎥 Projection Mapping</a>
+      <h1>Your mappings</h1>
+      <div class="lib-actions">
+        <button id="import-btn" type="button">⇪ Import projection</button>
+        <a href="{{ urlFor('mapper') }}" class="btn primary">+ New mapping</a>
+      </div>
+      <input type="file" id="import-input" accept=".pmap,application/zip" hidden />
+    </header>
+
+    <div id="lib-status" class="lib-status" role="status" aria-live="polite"></div>
+    @if(mappings.length)
+      <ul class="lib-grid">
+        @each(m in mappings)
+          <li class="lib-card" data-id="{{ m.id }}">
+            <a href="/app/{{ m.id }}" class="lib-thumb" aria-label="Open {{ m.name }}">
+              @if(m.thumbnail)
+                <img src="{{ m.thumbnail }}" alt="" loading="lazy" />
+              @else
+                <span class="lib-thumb-empty">No preview</span>
+              @end
+            </a>
+            <div class="lib-meta">
+              <a href="/app/{{ m.id }}" class="lib-name" title="{{ m.name }}">{{ m.name }}</a>
+              <div class="lib-sub">
+                {{ m.layers }}
+                {{ m.layers === 1 ? 'layer' : 'layers' }}
+                ·
+                {{ m.clips }}
+                {{ m.clips === 1 ? 'clip' : 'clips' }}
+                ·
+                <span data-duration="{{ m.duration }}"></span>
+              </div>
+              <div class="lib-sub">
+                Updated
+                <time datetime="{{ m.updatedAt }}">{{ m.updatedAt }}</time>
+              </div>
+            </div>
+            <div class="lib-card-actions">
+              <a href="/app/{{ m.id }}" class="btn">Open</a>
+              <a href="/api/mappings/{{ m.id }}/export" class="btn" download>Export</a>
+              <button
+                type="button"
+                class="danger"
+                data-delete="{{ m.id }}"
+                data-name="{{ m.name }}"
+              >
+                Delete
+              </button>
+            </div>
+          </li>
+        @end
+      </ul>
+    @else
+      <div class="lib-empty">
+        <h2>Save your first mapping</h2>
+        <p>
+          Build layers and a timeline in the app, then press Save (Ctrl/⌘ + S) to keep it here. You can also import a .pmap projection file exported from another machine.
+        </p>
+        <a href="{{ urlFor('mapper') }}" class="btn primary">Open the app</a>
+      </div>
+    @end
+  </div>
+@end
