@@ -38,11 +38,20 @@ export interface ClipData {
   color?: string
 }
 
+export interface MaskPoint {
+  x: number
+  y: number
+  /** Set when the point is pinned to warp corner 0-3 */
+  c?: number
+}
+
 export interface LayerData {
   name: string
   color: string
   visible: boolean
   corners: { x: number; y: number }[]
+  /** Cut-out polygon in the layer's uv space (0..1), or null for the whole quad */
+  mask: MaskPoint[] | null
   clips: ClipData[]
 }
 
@@ -79,6 +88,7 @@ const EXT_RE = /^[a-z0-9]{1,10}$/
 const MAX_LAYERS = 64
 const MAX_CLIPS = 1000
 const MAX_NAME = 120
+const MAX_MASK_POINTS = 32
 
 export class ValidationError extends Error {}
 
@@ -105,6 +115,20 @@ export function cleanName(v: unknown) {
   const name = str(v, '')
   if (!name) throw new ValidationError('Give the mapping a name')
   return name
+}
+
+function cleanMask(input: unknown, layerIndex: number): MaskPoint[] | null {
+  if (input === null || input === undefined) return null
+  if (!Array.isArray(input) || input.length < 3 || input.length > MAX_MASK_POINTS) {
+    throw new ValidationError(
+      `Layer ${layerIndex + 1}'s shape needs 3 to ${MAX_MASK_POINTS} points`
+    )
+  }
+  return input.map((p: any) => {
+    const point: MaskPoint = { x: num(p?.x, 0, 0, 1), y: num(p?.y, 0, 0, 1) }
+    if (Number.isInteger(p?.c) && p.c >= 0 && p.c <= 3) point.c = p.c
+    return point
+  })
 }
 
 /**
@@ -134,6 +158,7 @@ export function cleanMappingData(input: unknown): MappingData {
         x: num(c?.x, 0.5, -10, 11),
         y: num(c?.y, 0.5, -10, 11),
       })),
+      mask: cleanMask(l.mask, i),
       clips: clips.map((c: any, j: number): ClipData => {
         if (!c || !CLIP_KINDS.includes(c.kind)) {
           throw new ValidationError(`Clip ${j + 1} on layer ${i + 1} has an unknown type`)

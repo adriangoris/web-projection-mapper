@@ -33,6 +33,13 @@ function sampleData(media = VIDEO_REF) {
           { x: 0.9, y: 0.9 },
           { x: 0.1, y: 0.9 },
         ],
+        mask: [
+          { x: 0, y: 0, c: 0 },
+          { x: 0.5, y: 0.2 },
+          { x: 1, y: 0, c: 1 },
+          { x: 1, y: 1, c: 2 },
+          { x: 0, y: 1, c: 3 },
+        ] as { x: number; y: number; c?: number }[] | null,
         clips: [
           { kind: 'video', name: 'intro.mp4', start: 0, dur: 4, in: 0.5, media },
           { kind: 'color', name: '#ff0000', start: 4, dur: 10, in: 0, color: '#ff0000' },
@@ -131,6 +138,32 @@ test.group('Mappings API', (group) => {
     const badKind = sampleData()
     ;(badKind.layers[0].clips[0] as any).kind = 'script'
     await expectStatus(client.post('/api/mappings').json({ name: 'x', data: badKind }), 422)
+    const badMask = sampleData()
+    badMask.layers[0].mask = [{ x: 0, y: 0 }]
+    await expectStatus(client.post('/api/mappings').json({ name: 'x', data: badMask }), 422)
+  })
+
+  test('keeps shape masks and accepts layers saved before masks existed', async ({
+    client,
+    assert,
+  }) => {
+    await uploadVideo(client)
+    const legacy = sampleData()
+    delete (legacy.layers[0] as any).mask
+    legacy.layers[0].clips = legacy.layers[0].clips.filter((c) => c.kind !== 'video')
+    const res = await expectStatus(
+      client.post('/api/mappings').json({ name: 'Old', data: legacy }),
+      201
+    )
+    assert.isNull(res.body().mapping.data.layers[0].mask)
+
+    const clamped = sampleData()
+    clamped.layers[0].mask![1] = { x: 7, y: -2, c: 9 }
+    const saved = await expectStatus(
+      client.post('/api/mappings').json({ name: 'Clamped', data: clamped }),
+      201
+    )
+    assert.deepEqual(saved.body().mapping.data.layers[0].mask[1], { x: 1, y: 0 })
   })
 
   test('renders the library and opens a saved mapping in the app', async ({ client }) => {

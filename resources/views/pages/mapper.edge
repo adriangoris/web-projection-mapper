@@ -56,19 +56,30 @@
         </div>
       </div>
 
+      <div>
+        <h2>Shape</h2>
+        <div class="row" style="margin-top:6px">
+          <button id="reset-btn" class="secondary" title="Reset corners (R)">Reset corners</button>
+          <button id="reset-shape-btn" class="secondary" title="Remove added points (Shift+R)">
+            Reset shape
+          </button>
+        </div>
+        <div class="info" style="margin-top:4px">
+          Drag a layer to move it. Double-click its edge to add a point; double-click or Alt+click a point to remove it.
+        </div>
+      </div>
       <div class="row">
-        <button id="reset-btn" class="secondary">Reset</button>
         <button id="toggle-corners" class="secondary">Points (P)</button>
+        <button id="toggle-ui">Panel (H)</button>
       </div>
       <div class="row">
-        <button id="toggle-ui">Panel (H)</button>
         <button id="fullscreen-btn">Fullscreen (F)</button>
+        <button id="toggle-tl">Timeline (T)</button>
       </div>
-      <div class="row"><button id="toggle-tl">Timeline (T)</button></div>
 
       <div class="info" style="margin-top:auto">
         <strong>Hotkeys:</strong>
-        <div>H — panel | F — fullscreen | R — reset</div>
+        <div>H — panel | F — fullscreen | R — reset (Shift: shape)</div>
         <div>P — points | 1-9 — layer | Del — delete</div>
         <div>T — timeline | Space — play/pause</div>
         <div>Ctrl/⌘+S — save (Shift: save as)</div>
@@ -104,6 +115,7 @@
 
     <div id="canvas-wrap">
       <canvas id="gl"></canvas>
+      <svg id="shape-overlay" aria-hidden="true"></svg>
       <div class="corner" data-idx="0" data-label="TL"></div>
       <div class="corner" data-idx="1" data-label="TR"></div>
       <div class="corner" data-idx="2" data-label="BR"></div>

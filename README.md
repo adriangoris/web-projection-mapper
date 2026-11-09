@@ -14,6 +14,8 @@ A powerful, browser-based projection mapping tool built with WebGL. Create stunn
   - 📷 Live camera feed
   - 🎨 Solid colors
 - **Real-Time Warping** - Drag corner points to map your content onto any surface
+- **Move Layers** - Grab a layer anywhere inside its shape and drag it
+- **Custom Shapes** - Add points to a layer's outline to cut it into any polygon (arches, windows, triangles)
 - **Layer Management** - Show/hide, reorder, and delete layers
 - **Timeline Playback** - Sequence clips on per-layer tracks with a time ruler, playhead scrubbing, looping, and zoom
 - **Saved Mappings** - Save the whole scene (layers, corners, clips, timeline) under a name and reopen it from the Mappings library
@@ -44,6 +46,16 @@ The Timeline panel runs along the bottom of the screen:
 - **Clips** - Each source you load becomes a clip. Drag a clip to move it (it snaps to the playhead and other clip edges), drag it onto another track to change its layer, and drag its edges to trim it
 - Source buttons replace the **selected clip**. If no clip is selected, they add a new clip at the playhead (click an empty spot on a track to deselect)
 
+## Layer Shapes
+
+- **Move a layer** - Drag anywhere inside it. Clicking a layer on the canvas also selects it
+- **Warp** - Drag the round corner handles (perspective warp, as before)
+- **Add a point** - Double-click the dashed outline of the selected layer. The new diamond handle crops the layer: drag it inward to cut the shape
+- **Remove a point** - Double-click it or `Alt`+click it. Doing this on a corner removes that corner from the shape (it turns hollow but still warps)
+- **Reset shape** (`Shift`+`R`) - Back to the plain 4-corner quad. **Reset corners** (`R`) resets the warp only
+
+Shape points are stored relative to the layer, so they follow it when you warp or move it. Hiding the points (`P`) also locks layers so they can't be dragged during a show.
+
 ## Saved Mappings
 
 A mapping is everything you build in the app: its layers, corner positions, clips and timeline settings.
@@ -73,7 +85,7 @@ storage/media/<sha256>.<ext>   video and image files, stored once and shared bet
 | `H`            | Toggle control panel                                       |
 | `F`            | Toggle fullscreen                                          |
 | `P`            | Toggle corner points visibility                            |
-| `R`            | Reset active layer corners                                 |
+| `R`            | Reset active layer corners (`Shift`+`R`: reset its shape)  |
 | `1-9`          | Switch between layers                                      |
 | `T`            | Toggle timeline                                            |
 | `Space`        | Play / pause                                               |

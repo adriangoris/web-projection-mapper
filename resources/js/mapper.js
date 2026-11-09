@@ -18,6 +18,8 @@ varying vec2 v_pos;
 uniform sampler2D u_tex;
 uniform vec2 u_corners[4];
 uniform float u_alpha;
+uniform vec2 u_mask[32]; // optional cut-out polygon, in the layer's uv space
+uniform int u_maskN;
 
 vec2 getUV(vec2 p, vec2 c0, vec2 c1, vec2 c2, vec2 c3) {
   vec2 e = c1 - c0, f = c3 - c0, g = c0 - c1 + c2 - c3, h = p - c0;
@@ -39,9 +41,28 @@ vec2 getUV(vec2 p, vec2 c0, vec2 c1, vec2 c2, vec2 c3) {
   return vec2(u, v);
 }
 
+// Even-odd point-in-polygon test against the mask (no mask = whole quad)
+bool crosses(vec2 p, vec2 a, vec2 b) {
+  return ((a.y > p.y) != (b.y > p.y)) && (p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x);
+}
+bool inMask(vec2 p) {
+  if (u_maskN < 3) return true;
+  bool inside = false;
+  vec2 a = u_mask[0];
+  for (int i = 1; i < 32; i++) {
+    if (i >= u_maskN) break;
+    vec2 b = u_mask[i];
+    if (crosses(p, a, b)) inside = !inside;
+    a = b;
+  }
+  if (crosses(p, a, u_mask[0])) inside = !inside;
+  return inside;
+}
+
 void main() {
   vec2 uv = getUV(v_pos, u_corners[0], u_corners[1], u_corners[2], u_corners[3]);
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
+  if (!inMask(uv)) discard;
   vec4 c = texture2D(u_tex, uv);
   gl_FragColor = vec4(c.rgb, c.a * u_alpha);
 }`
@@ -62,6 +83,10 @@ gl.useProgram(prog)
 const aPos = gl.getAttribLocation(prog, 'a_pos')
 const uCorners = gl.getUniformLocation(prog, 'u_corners')
 const uAlpha = gl.getUniformLocation(prog, 'u_alpha')
+const uMask = gl.getUniformLocation(prog, 'u_mask')
+const uMaskN = gl.getUniformLocation(prog, 'u_maskN')
+const MAX_MASK_POINTS = 32
+const maskBuf = new Float32Array(MAX_MASK_POINTS * 2)
 
 const quadBuf = gl.createBuffer()
 gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf)
@@ -115,6 +140,7 @@ function createLayer({ empty = false } = {}) {
     color,
     visible: true,
     corners: defaultCorners(),
+    mask: null, // cut-out polygon in uv space, or null for the whole quad
     clips: [], // timeline clips on this layer's track
     texture: tex,
     uploaded: null, // media last uploaded to texture (skip re-uploading stills)
@@ -208,66 +234,345 @@ function colorSource(color = randomColor()) {
   return { kind: 'color', media: c, name: color, url: null, stream: null, srcDur: Infinity }
 }
 
-// Corner handling
+// ================= Shape editing =================
+// Each layer is warped by 4 corners (screen space, 0..1 of the canvas).
+// An optional mask polygon crops it. Mask points live in the layer's uv
+// space (0..1 across the quad), so they follow the corners when the layer
+// is warped or moved. Mask points with `c` set are pinned to that corner.
 const cornerEls = document.querySelectorAll('.corner')
-let dragging = null
+const overlay = document.getElementById('shape-overlay')
+const maskEls = [] // pool of handles for free mask points
+let dragging = null // corner index being dragged
+let maskDrag = null // { layer, index } mask point being dragged
+let layerDrag = null // { layer, x, y, corners } whole layer being moved
 let cornersVisible = true
+
+const CORNER_UV = [
+  { x: 0, y: 0 },
+  { x: 1, y: 0 },
+  { x: 1, y: 1 },
+  { x: 0, y: 1 },
+]
+const EDGE_STEPS = 16 // edges are curves on screen, so draw/test them in pieces
+const HIT_PX = 10
+
+const wrapRect = () => wrap.getBoundingClientRect()
+
+// uv -> screen (normalized). Matches the shader's bilinear mapping.
+function uvToScreen(corners, u, v) {
+  const [c0, c1, c2, c3] = corners
+  return {
+    x: c0.x + u * (c1.x - c0.x) + v * (c3.x - c0.x) + u * v * (c0.x - c1.x + c2.x - c3.x),
+    y: c0.y + u * (c1.y - c0.y) + v * (c3.y - c0.y) + u * v * (c0.y - c1.y + c2.y - c3.y),
+  }
+}
+
+// screen (normalized) -> uv. Port of getUV() in the fragment shader.
+function screenToUV(corners, px, py) {
+  const [c0, c1, c2, c3] = corners
+  const e = { x: c1.x - c0.x, y: c1.y - c0.y }
+  const f = { x: c3.x - c0.x, y: c3.y - c0.y }
+  const g = { x: c0.x - c1.x + c2.x - c3.x, y: c0.y - c1.y + c2.y - c3.y }
+  const h = { x: px - c0.x, y: py - c0.y }
+  const k2 = g.x * f.y - g.y * f.x
+  const k1 = e.x * f.y - e.y * f.x + h.x * g.y - h.y * g.x
+  const k0 = h.x * e.y - h.y * e.x
+  let v
+  if (Math.abs(k2) < 1e-6) v = -k0 / k1
+  else {
+    let disc = k1 * k1 - 4 * k0 * k2
+    if (disc < 0) return null
+    disc = Math.sqrt(disc)
+    const v1 = (-k1 - disc) / (2 * k2)
+    const v2 = (-k1 + disc) / (2 * k2)
+    v = v1 >= 0 && v1 <= 1 ? v1 : v2
+  }
+  const dx = e.x + g.x * v
+  const u = Math.abs(dx) < 1e-6 ? (h.y - f.y * v) / (e.y + g.y * v) : (h.x - f.x * v) / dx
+  return Number.isFinite(u) && Number.isFinite(v) ? { x: u, y: v } : null
+}
+
+function pointInPoly(p, poly) {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[j],
+      b = poly[i]
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside
+    }
+  }
+  return inside
+}
+
+// The outline in uv space: the mask, or the 4 corners
+function shapeUV(layer) {
+  return layer.mask || CORNER_UV.map((p, c) => ({ ...p, c }))
+}
+
+function layerContains(layer, nx, ny) {
+  const uv = screenToUV(layer.corners, nx, ny)
+  if (!uv || uv.x < 0 || uv.x > 1 || uv.y < 0 || uv.y > 1) return false
+  return !layer.mask || pointInPoly(uv, layer.mask)
+}
+
+// Points along each outline edge, in pixels: [{ edge, x, y }]
+function outlinePixels(layer, rect) {
+  const pts = shapeUV(layer)
+  const out = []
+  pts.forEach((a, i) => {
+    const b = pts[(i + 1) % pts.length]
+    for (let s = 0; s < EDGE_STEPS; s++) {
+      const t = s / EDGE_STEPS
+      const p = uvToScreen(layer.corners, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)
+      out.push({ edge: i, x: p.x * rect.width, y: p.y * rect.height })
+    }
+  })
+  return out
+}
+
+function quadPath(layer, rect) {
+  const sample = []
+  CORNER_UV.forEach((a, i) => {
+    const b = CORNER_UV[(i + 1) % 4]
+    for (let s = 0; s < EDGE_STEPS; s++) {
+      const t = s / EDGE_STEPS
+      const p = uvToScreen(layer.corners, a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t)
+      sample.push(`${(p.x * rect.width).toFixed(1)},${(p.y * rect.height).toFixed(1)}`)
+    }
+  })
+  return 'M' + sample.join('L') + 'Z'
+}
 
 function updateCornerPositions() {
   const layer = getActiveLayer()
-  const rect = wrap.getBoundingClientRect()
+  const rect = wrapRect()
+  const show = !!(layer && cornersVisible)
 
   cornerEls.forEach((el, i) => {
-    if (layer && cornersVisible) {
-      el.classList.add('visible')
-      el.style.left = layer.corners[i].x * rect.width + 'px'
-      el.style.top = layer.corners[i].y * rect.height + 'px'
-      el.style.background = layer.color
-      el.style.color = layer.color
-    } else {
-      el.classList.remove('visible')
-    }
+    el.classList.toggle('visible', show)
+    if (!show) return
+    el.style.left = layer.corners[i].x * rect.width + 'px'
+    el.style.top = layer.corners[i].y * rect.height + 'px'
+    el.style.background = layer.color
+    el.style.color = layer.color
+    // A corner removed from the mask still warps, so show it hollow
+    const inShape = !layer.mask || layer.mask.some((p) => p.c === i)
+    el.classList.toggle('cut', !inShape)
   })
+
+  // Free mask point handles
+  const free =
+    show && layer.mask ? layer.mask.map((p, i) => ({ p, i })).filter((m) => m.p.c == null) : []
+  while (maskEls.length < free.length) {
+    const el = document.createElement('div')
+    el.className = 'mask-pt'
+    el.title = 'Drag to move · double-click or Alt+click to remove'
+    wrap.appendChild(el)
+    maskEls.push(el)
+  }
+  maskEls.forEach((el, k) => {
+    const m = free[k]
+    el.hidden = !m
+    if (!m) return
+    const s = uvToScreen(layer.corners, m.p.x, m.p.y)
+    el.dataset.index = m.i
+    el.style.left = s.x * rect.width + 'px'
+    el.style.top = s.y * rect.height + 'px'
+    el.style.borderColor = layer.color
+  })
+
+  // Outline
+  overlay.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`)
+  if (!show) {
+    overlay.innerHTML = ''
+    return
+  }
+  const pts = outlinePixels(layer, rect)
+  const d = 'M' + pts.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join('L') + 'Z'
+  overlay.innerHTML =
+    (layer.mask ? `<path class="quad" d="${quadPath(layer, rect)}" />` : '') +
+    `<path class="outline" d="${d}" style="stroke:${layer.color}" />`
+}
+
+function toNormalized(clientX, clientY) {
+  const rect = wrapRect()
+  return { x: (clientX - rect.left) / rect.width, y: (clientY - rect.top) / rect.height }
 }
 
 function handleDrag(clientX, clientY) {
-  if (dragging === null) return
-  const layer = getActiveLayer()
-  if (!layer) return
-  const rect = wrap.getBoundingClientRect()
-  layer.corners[dragging].x = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
-  layer.corners[dragging].y = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height))
+  const n = toNormalized(clientX, clientY)
+
+  if (dragging !== null) {
+    const layer = getActiveLayer()
+    if (!layer) return
+    layer.corners[dragging].x = clamp(n.x, 0, 1)
+    layer.corners[dragging].y = clamp(n.y, 0, 1)
+  } else if (maskDrag) {
+    const uv = screenToUV(maskDrag.layer.corners, n.x, n.y)
+    if (!uv) return
+    const p = maskDrag.layer.mask[maskDrag.index]
+    p.x = clamp(uv.x, 0, 1)
+    p.y = clamp(uv.y, 0, 1)
+  } else if (layerDrag) {
+    // Move every corner by the same amount, keeping the layer on screen
+    const o = layerDrag.corners
+    const dx = clamp(
+      n.x - layerDrag.x,
+      -Math.min(...o.map((c) => c.x)),
+      1 - Math.max(...o.map((c) => c.x))
+    )
+    const dy = clamp(
+      n.y - layerDrag.y,
+      -Math.min(...o.map((c) => c.y)),
+      1 - Math.max(...o.map((c) => c.y))
+    )
+    layerDrag.layer.corners = o.map((c) => ({ x: c.x + dx, y: c.y + dy }))
+  } else return
   updateCornerPositions()
 }
 
-cornerEls.forEach((el) => {
-  el.addEventListener('mousedown', (e) => {
+function endDrag() {
+  dragging = null
+  if (maskDrag) tidyMask(maskDrag.layer)
+  maskDrag = null
+  if (layerDrag) wrap.classList.remove('moving')
+  layerDrag = null
+}
+
+// Remove a point from the mask. `cornerIdx` removes a pinned corner instead.
+function removeMaskPoint(layer, { index = -1, cornerIdx = -1 } = {}) {
+  const pts = shapeUV(layer)
+  const i = cornerIdx >= 0 ? pts.findIndex((p) => p.c === cornerIdx) : index
+  if (i < 0) return
+  if (pts.length <= 3) {
+    setStatus('A shape needs at least 3 points')
+    return
+  }
+  pts.splice(i, 1)
+  layer.mask = pts
+  tidyMask(layer)
+  updateCornerPositions()
+}
+
+// Back to "no mask" when the shape is just the 4 corners again
+function tidyMask(layer) {
+  const m = layer.mask
+  if (m && m.length === 4 && m.every((p, i) => p.c === i)) layer.mask = null
+}
+
+function resetActiveShape() {
+  const layer = getActiveLayer()
+  if (!layer) return
+  layer.mask = null
+  updateCornerPositions()
+}
+
+function onPointRemoveGesture(e, fn) {
+  if (e.altKey) {
     e.preventDefault()
-    dragging = +el.dataset.idx
+    e.stopPropagation()
+    fn()
+    return true
+  }
+  return false
+}
+
+cornerEls.forEach((el) => {
+  const idx = +el.dataset.idx
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const layer = getActiveLayer()
+    if (layer && onPointRemoveGesture(e, () => removeMaskPoint(layer, { cornerIdx: idx }))) return
+    dragging = idx
   })
-  el.addEventListener(
-    'touchstart',
-    (e) => {
-      e.preventDefault()
-      dragging = +el.dataset.idx
-    },
-    { passive: false }
-  )
+  el.addEventListener('dblclick', (e) => {
+    e.stopPropagation()
+    const layer = getActiveLayer()
+    if (layer) removeMaskPoint(layer, { cornerIdx: idx })
+  })
 })
 
-document.addEventListener('mousemove', (e) => handleDrag(e.clientX, e.clientY))
-document.addEventListener(
-  'touchmove',
-  (e) => {
-    if (dragging !== null) {
-      e.preventDefault()
-      handleDrag(e.touches[0].clientX, e.touches[0].clientY)
-    }
-  },
-  { passive: false }
-)
-document.addEventListener('mouseup', () => (dragging = null))
-document.addEventListener('touchend', () => (dragging = null))
+wrap.addEventListener('pointerdown', (e) => {
+  if (!cornersVisible || e.button !== 0) return
+  const handle = e.target.closest('.mask-pt')
+  if (handle) {
+    e.preventDefault()
+    const layer = getActiveLayer()
+    const index = +handle.dataset.index
+    if (onPointRemoveGesture(e, () => removeMaskPoint(layer, { index }))) return
+    maskDrag = { layer, index }
+    return
+  }
+  if (e.target !== canvas) return
+
+  // Grab the top-most visible layer under the pointer (the active one wins ties)
+  const n = toNormalized(e.clientX, e.clientY)
+  const active = getActiveLayer()
+  let hit = active && active.visible && layerContains(active, n.x, n.y) ? active : null
+  for (let i = layers.length - 1; !hit && i >= 0; i--) {
+    if (layers[i].visible && layerContains(layers[i], n.x, n.y)) hit = layers[i]
+  }
+  if (!hit) return
+  e.preventDefault()
+  if (hit !== active) setActiveLayer(hit.id)
+  layerDrag = { layer: hit, x: n.x, y: n.y, corners: hit.corners.map((c) => ({ ...c })) }
+  wrap.classList.add('moving')
+})
+
+wrap.addEventListener('dblclick', (e) => {
+  if (!cornersVisible) return
+  const layer = getActiveLayer()
+  if (!layer) return
+  if (e.target.closest('.mask-pt')) {
+    removeMaskPoint(layer, { index: +e.target.closest('.mask-pt').dataset.index })
+    return
+  }
+  if (e.target !== canvas) return
+
+  // Add a point on the nearest outline edge
+  const rect = wrapRect()
+  const px = e.clientX - rect.left,
+    py = e.clientY - rect.top
+  const line = outlinePixels(layer, rect)
+  let best = null
+  line.forEach((a, k) => {
+    const b = line[(k + 1) % line.length]
+    const vx = b.x - a.x,
+      vy = b.y - a.y
+    const t = clamp(((px - a.x) * vx + (py - a.y) * vy) / (vx * vx + vy * vy || 1), 0, 1)
+    const x = a.x + vx * t,
+      y = a.y + vy * t
+    const d = Math.hypot(px - x, py - y)
+    if (d <= HIT_PX && (!best || d < best.d)) best = { d, x, y, edge: a.edge }
+  })
+  if (!best) {
+    setStatus('Double-click on the edge of the selected layer to add a point')
+    return
+  }
+  const pts = shapeUV(layer)
+  if (pts.length >= MAX_MASK_POINTS) {
+    setStatus(`A shape can have up to ${MAX_MASK_POINTS} points`)
+    return
+  }
+  const uv = screenToUV(layer.corners, best.x / rect.width, best.y / rect.height)
+  if (!uv) return
+  pts.splice(best.edge + 1, 0, { x: clamp(uv.x, 0, 1), y: clamp(uv.y, 0, 1) })
+  layer.mask = pts
+  updateCornerPositions()
+})
+
+// Hover cursor: show "move" over layers you can grab
+wrap.addEventListener('pointermove', (e) => {
+  if (layerDrag || dragging !== null || maskDrag || e.target !== canvas) return
+  const n = toNormalized(e.clientX, e.clientY)
+  const over = cornersVisible && layers.some((l) => l.visible && layerContains(l, n.x, n.y))
+  wrap.classList.toggle('grab', over)
+})
+
+document.addEventListener('pointermove', (e) => handleDrag(e.clientX, e.clientY))
+document.addEventListener('pointerup', endDrag)
+document.addEventListener('pointercancel', endDrag)
 
 // Render (called every frame from the playback loop)
 function render() {
@@ -309,6 +614,13 @@ function render() {
     ])
     gl.uniform2fv(uCorners, data)
     gl.uniform1f(uAlpha, 1.0)
+    const mask = layer.mask || []
+    mask.forEach((p, i) => {
+      maskBuf[i * 2] = p.x
+      maskBuf[i * 2 + 1] = p.y
+    })
+    gl.uniform2fv(uMask, maskBuf)
+    gl.uniform1i(uMaskN, mask.length)
     gl.drawArrays(gl.TRIANGLE_FAN, 0, 4)
   })
 }
@@ -822,6 +1134,7 @@ function resetActiveCorners() {
   updateCornerPositions()
 }
 document.getElementById('reset-btn').addEventListener('click', resetActiveCorners)
+document.getElementById('reset-shape-btn').addEventListener('click', resetActiveShape)
 
 // UI toggle
 const controls = document.getElementById('controls')
@@ -882,6 +1195,9 @@ function serializeMapping() {
       color: l.color,
       visible: l.visible,
       corners: l.corners.map((c) => ({ x: c.x, y: c.y })),
+      mask: l.mask
+        ? l.mask.map((p) => (p.c == null ? { x: p.x, y: p.y } : { x: p.x, y: p.y, c: p.c }))
+        : null,
       clips: l.clips.map((c) => {
         const out = { kind: c.kind, name: c.name, start: c.start, dur: c.dur, in: c.in }
         if (c.kind === 'color') out.color = c.name
@@ -1136,6 +1452,7 @@ async function openMapping(id) {
         color: l.color,
         visible: l.visible,
         corners: l.corners.map((c) => ({ x: c.x, y: c.y })),
+        mask: l.mask ? l.mask.map((p) => ({ ...p })) : null,
       })
       layer.clips = l.clips.map((c, j) => {
         const { missing, ...src } = sources[i][j]
@@ -1246,7 +1563,7 @@ document.addEventListener('keydown', (e) => {
   if (key === 'f') toggleFullscreen()
   if (key === 'p') toggleCorners()
   if (key === 't') toggleTimeline()
-  if (key === 'r') resetActiveCorners()
+  if (key === 'r') e.shiftKey ? resetActiveShape() : resetActiveCorners()
   if (key === ' ') {
     e.preventDefault()
     setPlaying(!tl.playing)

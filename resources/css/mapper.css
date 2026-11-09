@@ -476,3 +476,54 @@ body.tl-hidden #timeline {
 #mapping-status.error {
   color: #f66;
 }
+
+/* ---------- Shape editing ---------- */
+canvas {
+  touch-action: none;
+}
+#canvas-wrap.grab canvas {
+  cursor: grab;
+}
+#canvas-wrap.moving,
+#canvas-wrap.moving canvas {
+  cursor: grabbing;
+}
+#shape-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 50;
+}
+#shape-overlay .outline {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+#shape-overlay .quad {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.25);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+}
+.corner.cut {
+  background: transparent !important;
+}
+.mask-pt {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #fff;
+  background: #111;
+  transform: translate(-50%, -50%) rotate(45deg);
+  cursor: move;
+  z-index: 100;
+  touch-action: none;
+}
+.mask-pt:hover {
+  background: #fff;
+}
+.mask-pt[hidden] {
+  display: none;
+}
