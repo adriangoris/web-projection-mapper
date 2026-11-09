@@ -1,6 +1,6 @@
 # 🎥 Projection Mapping Web
 
-**[Open App](https://vitalyu.github.io/ProjectorVideoMappingWeb/app.html)**
+**[Open App](https://adriangoris.github.io/web-projection-mapper/app.html)**
 
 A powerful, browser-based projection mapping tool built with WebGL. Create stunning visual projections by mapping videos, images, or camera feeds onto any surface with precise 4-corner perspective correction.
 
@@ -22,7 +22,7 @@ A powerful, browser-based projection mapping tool built with WebGL. Create stunn
 
 ## Usage
 
-1. [Open App](https://vitalyu.github.io/ProjectorVideoMappingWeb/app.html) in your browser
+1. [Open App](https://adriangoris.github.io/web-projection-mapper/app.html) in your browser
 2. Click **+ Add Layer** to create a new projection layer
 3. Choose your content source:
    - **📁 File** - Upload a video or image
