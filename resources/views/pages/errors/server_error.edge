@@ -1,0 +1,9 @@
+@layouts.main({ title: 'Error - Projection Mapping Web' })
+  <div class="container">
+    <header>
+      <h1>{{ error.status || 500 }}</h1>
+      <p class="tagline">Something went wrong on the server. Please try again in a moment.</p>
+    </header>
+    <div class="hero"><a href="{{ urlFor('home') }}" class="cta-button">Back home →</a></div>
+  </div>
+@end
