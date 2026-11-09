@@ -1,0 +1,83 @@
+@layouts.main({
+  title: 'Projection Mapping',
+  entrypoints: ['resources/css/mapper.css', 'resources/js/mapper.js'],
+})
+  <div id="app">
+    <div id="controls">
+      <h1>🎥 Projection Mapping</h1>
+
+      <div>
+        <h2>Layers</h2>
+        <div id="layers-list"></div>
+        <button id="add-layer-btn" class="primary" style="width:100%;margin-top:6px">
+          + Add Layer
+        </button>
+      </div>
+
+      <div>
+        <h2>Layer Source</h2>
+        <div class="source-btns">
+          <button id="src-file">📁 File</button>
+          <button id="src-camera">📷 Camera</button>
+          <button id="src-color">🎨 Color</button>
+        </div>
+        <input type="file" id="file-input" accept="video/*,image/*" />
+        <div class="info" style="margin-top:4px">
+          Replaces the selected clip, or adds a new clip at the playhead.
+        </div>
+      </div>
+
+      <div class="row">
+        <button id="reset-btn" class="secondary">Reset</button>
+        <button id="toggle-corners" class="secondary">Points (P)</button>
+      </div>
+      <div class="row">
+        <button id="toggle-ui">Panel (H)</button>
+        <button id="fullscreen-btn">Fullscreen (F)</button>
+      </div>
+      <div class="row"><button id="toggle-tl">Timeline (T)</button></div>
+
+      <div class="info" style="margin-top:auto">
+        <strong>Hotkeys:</strong>
+        <div>H — panel | F — fullscreen | R — reset</div>
+        <div>P — points | 1-9 — layer | Del — delete</div>
+        <div>T — timeline | Space — play/pause</div>
+        <div>←/→ — step (Shift: 1s) | Home/End</div>
+      </div>
+    </div>
+
+    <div id="timeline">
+      <div id="tl-transport">
+        <button id="tl-start" title="Go to start (Home)">⏮</button>
+        <button id="tl-play" title="Play / Pause (Space)">▶</button>
+        <button id="tl-end" title="Go to end (End)">⏭</button>
+        <span id="tl-time">00:00.00</span>
+        <span id="tl-dur">/ 00:00.00</span>
+        <button id="tl-loop" class="on" title="Loop playback">⟲ Loop</button>
+        <div class="tl-spacer"></div>
+        <span class="tl-hint">Drag clips to move · drag edges to trim · Ctrl/⌘+scroll to zoom</span>
+        <button id="tl-zoom-out" title="Zoom out">−</button>
+        <input type="range" id="tl-zoom" min="0.69" max="5.99" step="0.01" />
+        <button id="tl-zoom-in" title="Zoom in">+</button>
+      </div>
+      <div id="tl-scroll">
+        <div id="tl-content">
+          <div class="tl-row tl-ruler-row">
+            <div class="tl-head"></div>
+            <div id="tl-ruler" class="tl-lane"></div>
+          </div>
+          <div id="tl-tracks"></div>
+          <div id="tl-playhead"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="canvas-wrap">
+      <canvas id="gl"></canvas>
+      <div class="corner" data-idx="0" data-label="TL"></div>
+      <div class="corner" data-idx="1" data-label="TR"></div>
+      <div class="corner" data-idx="2" data-label="BR"></div>
+      <div class="corner" data-idx="3" data-label="BL"></div>
+    </div>
+  </div>
+@end

@@ -44,18 +44,18 @@ The Timeline panel runs along the bottom of the screen:
 
 ## Keyboard Shortcuts
 
-| Key | Action |
-|-----|--------|
-| `H` | Toggle control panel |
-| `F` | Toggle fullscreen |
-| `P` | Toggle corner points visibility |
-| `R` | Reset active layer corners |
-| `1-9` | Switch between layers |
-| `T` | Toggle timeline |
-| `Space` | Play / pause |
-| `←` / `→` | Step one frame (hold `Shift` for 1s) |
-| `Home` / `End` | Jump to start / end |
-| `Delete` | Delete selected clip (or active layer if no clip selected) |
+| Key            | Action                                                     |
+| -------------- | ---------------------------------------------------------- |
+| `H`            | Toggle control panel                                       |
+| `F`            | Toggle fullscreen                                          |
+| `P`            | Toggle corner points visibility                            |
+| `R`            | Reset active layer corners                                 |
+| `1-9`          | Switch between layers                                      |
+| `T`            | Toggle timeline                                            |
+| `Space`        | Play / pause                                               |
+| `←` / `→`      | Step one frame (hold `Shift` for 1s)                       |
+| `Home` / `End` | Jump to start / end                                        |
+| `Delete`       | Delete selected clip (or active layer if no clip selected) |
 
 ## Controls
 
@@ -66,15 +66,62 @@ The Timeline panel runs along the bottom of the screen:
 
 ## Technical Details
 
-- Built with vanilla JavaScript and WebGL
-- Uses perspective correction shader for accurate mapping
-- Supports real-time video playback
-- Hardware-accelerated rendering
-- No external dependencies
+- Served by [AdonisJS 7](https://github.com/adonisjs/core) (Node.js), with pages rendered from Edge templates
+- Frontend assets bundled by Vite through `@adonisjs/vite`
+- Rendering is still vanilla JavaScript and WebGL, using a perspective-correction shader for accurate mapping
+- Supports real-time video playback with hardware-accelerated rendering
+- All media stays in the browser: nothing is uploaded to the server
+
+## Development
+
+Requires **Node.js 24+** (see `.nvmrc`) and npm.
+
+```bash
+nvm use                    # or install Node 24 another way
+npm install
+cp .env.example .env
+node ace generate:key      # writes APP_KEY into .env
+npm run dev                # http://localhost:3333 (with HMR)
+```
+
+| Script              | Purpose                                   |
+| ------------------- | ----------------------------------------- |
+| `npm run dev`       | Start the dev server with hot reloading   |
+| `npm test`          | Run the Japa test suite                   |
+| `npm run lint`      | Lint with ESLint                          |
+| `npm run typecheck` | Type-check with TypeScript                |
+| `npm run build`     | Create a production build in `build/`     |
+| `npm start`         | Start the built server (run from `build`) |
+
+### Production
+
+```bash
+npm run build
+cd build
+npm ci --omit=dev
+cp ../.env .env            # set NODE_ENV=production, HOST, PORT, APP_KEY, APP_URL
+node bin/server.js
+```
+
+### Project structure
+
+```
+start/routes.ts                     Routes: / (landing) and /app (mapper)
+resources/views/pages/home.edge     Landing page
+resources/views/pages/mapper.edge   Projection mapping app markup
+resources/views/components/layouts/main.edge  Shared HTML layout
+resources/js/mapper.js              WebGL renderer, layers, timeline
+resources/css/                      Page styles (home.css, mapper.css)
+public/                             Static files (demo.gif)
+tests/functional/                   HTTP tests
+```
+
+The old static URLs `/index.html` and `/app.html` redirect to `/` and `/app`.
 
 ## Browser Compatibility
 
 Works in all modern browsers that support:
+
 - WebGL
 - MediaDevices API (for camera input)
 - ES6+ JavaScript
@@ -82,4 +129,3 @@ Works in all modern browsers that support:
 ## License
 
 MIT License - Feel free to use for personal or commercial projects
-
