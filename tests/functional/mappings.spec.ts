@@ -25,6 +25,7 @@ function sampleData(media = VIDEO_REF) {
     layers: [
       {
         name: 'Wall',
+        description: 'Main wall, left of the door',
         color: '#00ff99',
         visible: true,
         corners: [
@@ -150,12 +151,14 @@ test.group('Mappings API', (group) => {
     await uploadVideo(client)
     const legacy = sampleData()
     delete (legacy.layers[0] as any).mask
+    delete (legacy.layers[0] as any).description
     legacy.layers[0].clips = legacy.layers[0].clips.filter((c) => c.kind !== 'video')
     const res = await expectStatus(
       client.post('/api/mappings').json({ name: 'Old', data: legacy }),
       201
     )
     assert.isNull(res.body().mapping.data.layers[0].mask)
+    assert.equal(res.body().mapping.data.layers[0].description, '')
 
     const clamped = sampleData()
     clamped.layers[0].mask![1] = { x: 7, y: -2, c: 9 }

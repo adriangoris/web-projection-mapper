@@ -583,6 +583,7 @@ function createLayer({ empty = false } = {}) {
   const layer = {
     id,
     name: `Layer ${id}`,
+    description: '',
     color,
     visible: true,
     corners: defaultCorners(),
@@ -619,6 +620,71 @@ function setActiveLayer(id) {
   updateCornerPositions()
 }
 
+// ---- Layer name and description ----
+const layerNameInput = document.getElementById('layer-name')
+const layerDescInput = document.getElementById('layer-desc')
+const layerDetails = document.getElementById('layer-details')
+
+function renderLayerDetails() {
+  const layer = getActiveLayer()
+  layerDetails.hidden = !layer
+  if (!layer) return
+  // Don't overwrite what someone is typing
+  if (document.activeElement !== layerNameInput) layerNameInput.value = layer.name
+  if (document.activeElement !== layerDescInput) layerDescInput.value = layer.description || ''
+}
+
+function renameLayer(layer, name) {
+  layer.name = name.trim().slice(0, 120) || layer.name
+  renderLayersList()
+}
+
+layerNameInput.addEventListener('input', () => {
+  const layer = getActiveLayer()
+  if (!layer || !layerNameInput.value.trim()) return
+  layer.name = layerNameInput.value.trim().slice(0, 120)
+  renderLayersList()
+})
+layerNameInput.addEventListener('blur', () => renderLayerDetails())
+layerNameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' || e.key === 'Escape') layerNameInput.blur()
+})
+layerDescInput.addEventListener('input', () => {
+  const layer = getActiveLayer()
+  if (!layer) return
+  layer.description = layerDescInput.value.slice(0, 1000)
+  renderLayersList()
+})
+layerDescInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') layerDescInput.blur()
+})
+
+// Double-click a layer's name in the list to rename it in place
+function startInlineRename(item, layer) {
+  const span = item.querySelector('.layer-name')
+  const input = document.createElement('input')
+  input.className = 'layer-rename'
+  input.value = layer.name
+  input.maxLength = 120
+  span.replaceWith(input)
+  input.focus()
+  input.select()
+  let done = false
+  const finish = (save) => {
+    if (done) return
+    done = true
+    if (save) renameLayer(layer, input.value)
+    else renderLayersList()
+  }
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation()
+    if (e.key === 'Enter') finish(true)
+    if (e.key === 'Escape') finish(false)
+  })
+  input.addEventListener('blur', () => finish(true))
+  input.addEventListener('click', (e) => e.stopPropagation())
+}
+
 function getActiveLayer() {
   return layers.find((l) => l.id === activeLayerId)
 }
@@ -636,9 +702,12 @@ function renderLayersList() {
   list.innerHTML = layers
     .map(
       (l) => `
-    <div class="layer-item ${l.id === activeLayerId ? 'active' : ''}" data-id="${l.id}">
+    <div class="layer-item ${l.id === activeLayerId ? 'active' : ''}" data-id="${l.id}" title="${esc(l.description || 'Double-click the name to rename')}">
       <div class="layer-color" style="background:${l.color}"></div>
-      <span class="layer-name">${esc(l.name)}</span>
+      <div class="layer-text">
+        <span class="layer-name">${esc(l.name)}</span>
+        ${l.description ? `<span class="layer-desc">${esc(l.description)}</span>` : ''}
+      </div>
       <button class="layer-btn vis ${l.visible ? '' : 'off'}" data-id="${l.id}">${l.visible ? '👁' : '👁‍🗨'}</button>
       <button class="layer-btn del" data-id="${l.id}">×</button>
     </div>
@@ -648,8 +717,13 @@ function renderLayersList() {
 
   list.querySelectorAll('.layer-item').forEach((el) => {
     el.addEventListener('click', (e) => {
-      if (e.target.classList.contains('layer-btn')) return
-      setActiveLayer(+el.dataset.id)
+      if (e.target.classList.contains('layer-btn') || e.target.closest('.layer-rename')) return
+      if (+el.dataset.id !== activeLayerId) setActiveLayer(+el.dataset.id)
+    })
+    el.querySelector('.layer-name').addEventListener('dblclick', (e) => {
+      e.stopPropagation()
+      const layer = layers.find((l) => l.id === +el.dataset.id)
+      if (layer) startInlineRename(el, layer)
     })
   })
 
@@ -667,6 +741,7 @@ function renderLayersList() {
     })
   })
 
+  renderLayerDetails()
   renderTimeline()
 }
 
@@ -1346,7 +1421,7 @@ function renderTimeline() {
     <div class="tl-row ${l.id === activeLayerId ? 'active' : ''}" data-layer="${l.id}">
       <div class="tl-head">
         <div class="layer-color" style="background:${l.color}"></div>
-        <span class="name">${esc(l.name)}</span>
+        <span class="name" title="${esc(l.description ? `${l.name} — ${l.description}` : l.name)}">${esc(l.name)}</span>
         <button class="layer-btn vis ${l.visible ? '' : 'off'}" data-id="${l.id}">${l.visible ? '👁' : '👁‍🗨'}</button>
       </div>
       <div class="tl-lane" style="width:${w}px">${l.clips
@@ -1701,6 +1776,7 @@ function serializeMapping() {
     timeline: { loop: tl.loop, pps: Math.round(tl.pps * 100) / 100 },
     layers: layers.map((l) => ({
       name: l.name,
+      description: l.description || '',
       color: l.color,
       visible: l.visible,
       corners: l.corners.map((c) => ({ x: c.x, y: c.y })),
@@ -1966,6 +2042,7 @@ async function openMapping(id) {
       const layer = createLayer({ empty: true })
       Object.assign(layer, {
         name: l.name,
+        description: l.description || '',
         color: l.color,
         visible: l.visible,
         corners: l.corners.map((c) => ({ x: c.x, y: c.y })),

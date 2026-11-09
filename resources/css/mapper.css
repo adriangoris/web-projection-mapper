@@ -816,3 +816,57 @@ button:disabled {
   opacity: 0.5;
   cursor: default;
 }
+
+/* ---------- Layer details ---------- */
+.layer-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.layer-desc {
+  font-size: 10px;
+  color: #8a90a0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.layer-rename {
+  width: 100%;
+  padding: 1px 4px;
+  border: 1px solid #0f9;
+  border-radius: 3px;
+  background: #0d1326;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+}
+#layer-details {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+#layer-details[hidden] {
+  display: none;
+}
+#layer-name,
+#layer-desc {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #334;
+  border-radius: 5px;
+  background: #1a1a2e;
+  color: #fff;
+  font: inherit;
+  font-size: 12px;
+}
+#layer-desc {
+  resize: vertical;
+  min-height: 44px;
+  line-height: 1.4;
+}
+#layer-name:focus,
+#layer-desc:focus {
+  outline: none;
+  border-color: #0f9;
+}

@@ -17,7 +17,7 @@ A powerful, browser-based projection mapping tool built with WebGL. Create stunn
 - **Real-Time Warping** - Drag corner points to map your content onto any surface
 - **Move Layers** - Grab a layer anywhere inside its shape and drag it
 - **Custom Shapes** - Add points to a layer's outline to cut it into any polygon (arches, windows, triangles)
-- **Layer Management** - Show/hide, reorder, and delete layers
+- **Layer Management** - Name, describe, show/hide, reorder, and delete layers
 - **Timeline Playback** - Sequence clips on per-layer tracks with a time ruler, playhead scrubbing, looping, and zoom
 - **Saved Mappings** - Save the whole scene (layers, corners, clips, timeline) under a name and reopen it from the Mappings library
 - **Projection Files** - Export a mapping with all its media as a single `.pmap` file and import it on another machine
@@ -59,6 +59,10 @@ Materials are animated, generated sources: patterns, noise, light effects and 3D
 Materials use the [ISF](https://isf.video) shader format, so many shaders from the ISF library, VDMX or MadMapper can be imported. A JSON header lists the settings (`float`, `long`, `bool`, `color`, `point2D`), and the shader gets `isf_FragNormCoord`, `RENDERSIZE`, `TIME` (seconds into the clip) and `DATE`. Image and audio inputs and multi-pass shaders aren't supported yet.
 
 Built-in materials live in `resources/materials/*.fs`; materials you add are saved in `storage/materials/` and are included in `.pmap` exports when a mapping uses them.
+
+## Layer Names and Descriptions
+
+Select a layer and use **Layer details** under the layer list to give it a name and a description (for example which surface it covers, or notes for the show). You can also double-click a layer's name in the list to rename it in place (`Enter` saves, `Esc` cancels). The description shows under the name and as a tooltip, and both are saved with the mapping.
 
 ## Layer Shapes
 

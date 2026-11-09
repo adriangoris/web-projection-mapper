@@ -53,6 +53,8 @@ export interface MaskPoint {
 
 export interface LayerData {
   name: string
+  /** Free-text notes about the layer */
+  description: string
   color: string
   visible: boolean
   corners: { x: number; y: number }[]
@@ -181,6 +183,7 @@ export function cleanMappingData(input: unknown): MappingData {
 
     return {
       name: str(l.name, `Layer ${i + 1}`),
+      description: typeof l.description === 'string' ? l.description.trim().slice(0, 1000) : '',
       color: typeof l.color === 'string' && HEX_RE.test(l.color) ? l.color : '#00ff99',
       visible: l.visible !== false,
       corners: corners.map((c: any) => ({
