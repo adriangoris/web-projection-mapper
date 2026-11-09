@@ -11,7 +11,11 @@ import router from '@adonisjs/core/services/router'
 
 const MappingsController = () => import('#controllers/mappings_controller')
 
-router.on('/').render('pages/home').as('home')
+/**
+ * The mappings library is the homepage; the old landing page lives at /about
+ */
+router.on('/').redirectToPath('/mappings').as('home')
+router.on('/about').render('pages/home').as('about')
 
 /**
  * Pages

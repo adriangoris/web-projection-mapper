@@ -1,8 +1,15 @@
 import { test } from '@japa/runner'
 
 test.group('Pages', () => {
-  test('renders the landing page', async ({ client }) => {
-    const response = await client.get('/')
+  test('sends the homepage to the mappings library', async ({ client }) => {
+    const response = await client.get('/').redirects(0)
+
+    response.assertStatus(302)
+    response.assertHeader('location', '/mappings')
+  })
+
+  test('renders the landing page at /about', async ({ client }) => {
+    const response = await client.get('/about')
 
     response.assertStatus(200)
     response.assertTextIncludes('Projection Mapping Web')

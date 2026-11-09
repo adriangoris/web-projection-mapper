@@ -50,7 +50,7 @@ A mapping is everything you build in the app: its layers, corner positions, clip
 
 - **Save** (`Ctrl`/`⌘` + `S`) - Name the mapping in the box at the top of the panel and save it. The orange dot means there are unsaved changes
 - **Save as** (`Ctrl`/`⌘` + `Shift` + `S`) - Save a copy under a new name
-- **Mappings library** - Open `/mappings` (the **Mappings** button in the panel) to see every saved mapping with a preview. Open, export or delete them from there, or start a new one
+- **Mappings library** - The homepage (`/`, which opens `/mappings`) (the **Mappings** button in the panel) to see every saved mapping with a preview. Open, export or delete them from there, or start a new one
 - Each saved mapping has its own link, `/app/<id>`, so you can open it on the projector machine
 - Camera clips are saved as placeholders and ask for the camera again when the mapping opens
 
@@ -133,12 +133,12 @@ Saved mappings go to `build/storage/` unless `STORAGE_PATH` points somewhere els
 ### Project structure
 
 ```
-start/routes.ts                     Routes: pages and the /api mappings + media API
+start/routes.ts                     Routes: / (redirects to /mappings), /about, /app, and the /api
 app/controllers/mappings_controller.ts  Library page, editor page, mappings API
 app/services/mapping_store.ts       Saves mappings and media under storage/
 app/services/projection_file.ts     .pmap export / import
 app/services/zip.ts                 Minimal zip reader / writer
-resources/views/pages/home.edge     Landing page
+resources/views/pages/home.edge     Landing page (/about)
 resources/views/pages/mapper.edge   Projection mapping app markup
 resources/views/pages/mappings.edge Mappings library
 resources/views/components/layouts/main.edge  Shared HTML layout
